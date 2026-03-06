@@ -23,7 +23,7 @@ import { addDeriveViewer, removeDeriveViewer, deriveTickersCache, deriveSpotCach
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 3500;
 
 // Middleware
 app.use(cors());

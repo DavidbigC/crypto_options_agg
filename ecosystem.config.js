@@ -5,7 +5,7 @@ module.exports = {
       cwd: './backend',
       script: 'server.js',
       node_args: '--experimental-vm-modules',
-      env: { NODE_ENV: 'production', PORT: 8000 },
+      env: { NODE_ENV: 'production', PORT: 3500 },
       restart_delay: 3000,
     },
     {

@@ -22,7 +22,7 @@ if [ ! -f "$ROOT/backend/.env" ] && [ -f "$ROOT/backend/.env.example" ]; then
 fi
 
 echo ""
-echo "Starting backend on http://localhost:8000"
+echo "Starting backend on http://localhost:3500"
 echo "Starting frontend on http://localhost:3000"
 echo "Press Ctrl+C to stop both."
 echo ""
