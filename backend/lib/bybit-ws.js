@@ -28,15 +28,20 @@ let _updateCallback = null
 export function setBybitWsUpdateCallback(fn) { _updateCallback = fn }
 
 async function fetchInstruments(coin) {
+  const symbols = []
+  let cursor = ''
   try {
-    const url = `${BYBIT_REST}/market/instruments-info?category=option&baseCoin=${coin}`
-    const res = await fetch(url, { headers: { 'User-Agent': 'bybit-options-viewer/1.0' } })
-    const json = await res.json()
-    return (json.result?.list ?? []).map(i => i.symbol)
+    do {
+      const url = `${BYBIT_REST}/market/instruments-info?category=option&baseCoin=${coin}&limit=500${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`
+      const res = await fetch(url, { headers: { 'User-Agent': 'bybit-options-viewer/1.0' } })
+      const json = await res.json()
+      for (const i of json.result?.list ?? []) symbols.push(i.symbol)
+      cursor = json.result?.nextPageCursor ?? ''
+    } while (cursor)
   } catch (err) {
     console.error(`Bybit WS: instrument fetch error (${coin}):`, err.message)
-    return []
   }
+  return symbols
 }
 
 async function fetchAllInstruments() {
