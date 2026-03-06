@@ -142,9 +142,10 @@ export function startBybitWS() {
         const ticker = normalize(msg.data)
         symbolCache[ticker.symbol] = ticker
 
-        // Update spot cache from underlyingPrice
+        // Update spot cache from indexPrice (true spot index, consistent across all expiries)
+        // underlyingPrice varies per expiry due to futures basis — do not use for spot
         const coin = ticker.symbol.split('-')[0]
-        const spot = parseFloat(ticker.underlyingPrice)
+        const spot = parseFloat(msg.data.indexPrice)
         if (spot > 0 && bybitWsSpotCache[coin] !== undefined) {
           bybitWsSpotCache[coin] = spot
         }
