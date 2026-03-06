@@ -39,7 +39,7 @@ console.log(`🔧 Server starting in ${DEMO_MODE ? 'DEMO' : 'LIVE'} mode`);
 // ─── Response Builders (used by REST routes and SSE) ─────────────────────────
 
 function buildBybitResponse(baseCoin) {
-  const tickers   = bybitTickerCache[baseCoin] ?? []
+  const tickers   = Object.values(bybitTickerCache[baseCoin] ?? {})
   const spotPrice = bybitSpotCache[baseCoin] ?? 0
   if (tickers.length === 0) return null
   const optionsByDate = {}
@@ -126,7 +126,7 @@ function buildOkxResponse(instFamily) {
 
 function buildCombinedResponse(baseCoin) {
   const okxFamily         = `${baseCoin}-USD`
-  const bybitTickers      = bybitTickerCache[baseCoin] ?? []
+  const bybitTickers      = Object.values(bybitTickerCache[baseCoin] ?? {})
   const bybitSpot         = bybitSpotCache[baseCoin] ?? 0
   const okxFamilyCache    = okxCache[okxFamily] ?? {}
   const okxFamilyTickers  = okxTickerCache[okxFamily] ?? {}

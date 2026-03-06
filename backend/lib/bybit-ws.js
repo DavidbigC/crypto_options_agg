@@ -15,14 +15,12 @@ const RECONNECT_MAX_MS = 60_000
 const INSTRUMENT_REFRESH_MS = 10 * 60 * 1000  // 10 minutes
 const CHUNK = 500  // args per subscribe message
 
-// Cache shape identical to REST bybitTickerCache: { BTC: [...tickers], ETH: [...], SOL: [...] }
-export const bybitWsTickerCache = { BTC: [], ETH: [], SOL: [] }
+// Coin-keyed symbol cache: { BTC: { [symbol]: ticker }, ETH: {...}, SOL: {...} }
+// Keyed by coin so per-message updates are O(1) — no array rebuild on every tick
+export const bybitWsTickerCache = { BTC: {}, ETH: {}, SOL: {} }
 
-// Spot price cache: { BTC: 0, ETH: 0, SOL: 0 } — populated from underlyingPrice in ticker msgs
+// Spot price cache: { BTC: 0, ETH: 0, SOL: 0 } — populated from indexPrice in ticker msgs
 export const bybitWsSpotCache = { BTC: 0, ETH: 0, SOL: 0 }
-
-// Per-symbol ticker store for fast updates: { [symbol]: normalizedTicker }
-const symbolCache = {}
 
 let _updateCallback = null
 export function setBybitWsUpdateCallback(fn) { _updateCallback = fn }
@@ -87,8 +85,10 @@ export function startBybitWS() {
     console.log(`Bybit WS: fetched ${instruments.length} instruments across ${COINS.join('/')}`)
 
     const validSymbols = new Set(instruments.map(i => i.symbol))
-    for (const sym of Object.keys(symbolCache)) {
-      if (!validSymbols.has(sym)) delete symbolCache[sym]
+    for (const coin of COINS) {
+      for (const sym of Object.keys(bybitWsTickerCache[coin])) {
+        if (!validSymbols.has(sym)) delete bybitWsTickerCache[coin][sym]
+      }
     }
 
     console.log('Bybit WS: connecting...')
@@ -139,19 +139,15 @@ export function startBybitWS() {
       if (msg.op === 'subscribe') return
 
       if (msg.topic?.startsWith('tickers.') && msg.data) {
-        const ticker = normalize(msg.data)
-        symbolCache[ticker.symbol] = ticker
+        const coin = msg.data.symbol?.split('-')[0]
+        if (!coin || !bybitWsTickerCache[coin]) return
 
-        // Update spot cache from indexPrice (true spot index, consistent across all expiries)
-        // underlyingPrice varies per expiry due to futures basis — do not use for spot
-        const coin = ticker.symbol.split('-')[0]
+        // O(1) update — no array rebuild
+        bybitWsTickerCache[coin][msg.data.symbol] = normalize(msg.data)
+
+        // Update spot from indexPrice (consistent across all expiries)
         const spot = parseFloat(msg.data.indexPrice)
-        if (spot > 0 && bybitWsSpotCache[coin] !== undefined) {
-          bybitWsSpotCache[coin] = spot
-        }
-
-        // Rebuild the array cache for this coin and notify
-        bybitWsTickerCache[coin] = Object.values(symbolCache).filter(t => t.symbol.startsWith(`${coin}-`))
+        if (spot > 0) bybitWsSpotCache[coin] = spot
 
         if (_updateCallback) _updateCallback(coin)
       }
