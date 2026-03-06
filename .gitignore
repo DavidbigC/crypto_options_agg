@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+backend/venv/
+
+# Build output
+frontend/.next/
+frontend/out/
+
+# Environment
+.env
+.env.local
+.env.*.local
+backend/.env
+
+# Logs & misc
+*.log
+.DS_Store

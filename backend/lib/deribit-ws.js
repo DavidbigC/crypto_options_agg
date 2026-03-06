@@ -1,0 +1,101 @@
+/**
+ * Deribit WebSocket client
+ * Subscribes to ticker.{instrument_name}.100ms for all BTC/ETH/SOL options.
+ * Stores greeks (delta, gamma, theta, vega) keyed by instrument_name.
+ * Greeks are in USD for all coins (Deribit normalises internally).
+ */
+
+import { WebSocket } from 'ws'
+
+const WS_URL = 'wss://www.deribit.com/ws/api/v2'
+const DERIBIT_REST = 'https://www.deribit.com/api/v2'
+const CURRENCIES = ['BTC', 'ETH', 'SOL_USDC']
+const HEARTBEAT_MS = 25_000
+const RECONNECT_BASE_MS = 2_000
+const RECONNECT_MAX_MS = 60_000
+const CHUNK = 200  // channels per subscribe message
+
+// Greeks keyed by instrument_name: { delta, gamma, theta, vega, rho }
+export const deribitGreeksCache = {}
+
+let _updateCallback = null
+export function setDeribitUpdateCallback(fn) { _updateCallback = fn }
+
+async function fetchInstruments(currency) {
+  const url = `${DERIBIT_REST}/public/get_instruments?currency=${currency}&kind=option&expired=false`
+  const res = await fetch(url, { headers: { 'User-Agent': 'deribit-options-viewer/1.0' } })
+  const json = await res.json()
+  return json.result?.map(i => i.instrument_name) ?? []
+}
+
+export function startDeribitWS() {
+  let reconnectDelay = RECONNECT_BASE_MS
+
+  function connect() {
+    console.log('Deribit WS: connecting...')
+    const ws = new WebSocket(WS_URL)
+    let heartbeatTimer = null
+
+    ws.on('open', async () => {
+      console.log('Deribit WS: connected')
+      reconnectDelay = RECONNECT_BASE_MS
+
+      heartbeatTimer = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'public/test', id: 'hb' }))
+        }
+      }, HEARTBEAT_MS)
+
+      try {
+        const allInstruments = []
+        for (const currency of CURRENCIES) {
+          const instruments = await fetchInstruments(currency)
+          allInstruments.push(...instruments)
+        }
+
+        const channels = allInstruments.map(i => `ticker.${i}.100ms`)
+        for (let i = 0; i < channels.length; i += CHUNK) {
+          ws.send(JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'public/subscribe',
+            params: { channels: channels.slice(i, i + CHUNK) },
+            id: `sub-${i}`,
+          }))
+        }
+        console.log(`Deribit WS: subscribed to ${channels.length} ticker channels`)
+      } catch (err) {
+        console.error('Deribit WS subscribe error:', err.message)
+      }
+    })
+
+    ws.on('message', (raw) => {
+      let msg
+      try { msg = JSON.parse(raw) } catch { return }
+
+      if (msg.method !== 'subscription') return
+      const { channel, data } = msg.params ?? {}
+      if (!channel?.startsWith('ticker.') || !data?.greeks) return
+
+      const instrument = channel.split('.')[1]
+      deribitGreeksCache[instrument] = data.greeks
+      if (_updateCallback) {
+        const rawCurrency = instrument.split('-')[0]
+        _updateCallback(rawCurrency === 'SOL_USDC' ? 'SOL' : rawCurrency)
+      }
+    })
+
+    ws.on('close', () => {
+      clearInterval(heartbeatTimer)
+      console.log(`Deribit WS: closed, reconnecting in ${reconnectDelay}ms`)
+      setTimeout(connect, reconnectDelay)
+      reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS)
+    })
+
+    ws.on('error', (err) => {
+      console.error('Deribit WS error:', err.message)
+      ws.terminate()
+    })
+  }
+
+  connect()
+}

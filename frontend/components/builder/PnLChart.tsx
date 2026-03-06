@@ -1,0 +1,205 @@
+'use client'
+
+import { useMemo, useState, useEffect } from 'react'
+import classNames from 'classnames'
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ReferenceLine, ResponsiveContainer, Legend
+} from 'recharts'
+import { Leg } from '@/types/options'
+import { bsPrice, bsGreeks, findBreakevens, Greeks } from '@/lib/blackScholes'
+import { useTheme } from '@/components/ThemeProvider'
+
+interface PnLChartProps {
+  legs: Leg[]
+  spotPrice: number
+}
+
+const PRICE_POINTS = 120
+
+function computePnL(legs: Leg[], prices: number[], sliderDays: number, ivMult: number): number[] {
+  return prices.map(S => {
+    return legs.filter(l => l.enabled).reduce((sum, leg) => {
+      const expiryMs = new Date(leg.expiry).getTime()
+      const daysToExpiry = Math.max(0, (expiryMs - Date.now()) / 86_400_000)
+      const T = Math.max(0, (daysToExpiry - sliderDays) / 365)
+      const sigma = Math.max(0.001, leg.markVol * ivMult)
+      const value = bsPrice(S, leg.strike, T, sigma, 0, leg.type) * leg.qty * leg.contractSize
+      const cost  = leg.entryPrice * leg.qty
+      const sign  = leg.side === 'buy' ? 1 : -1
+      return sum + sign * (value - cost)
+    }, 0)
+  })
+}
+
+function computePositionGreeks(legs: Leg[], spot: number, sliderDays: number, ivMult: number): Greeks {
+  return legs.filter(l => l.enabled).reduce((acc, leg) => {
+    const expiryMs = new Date(leg.expiry).getTime()
+    const daysToExpiry = Math.max(0, (expiryMs - Date.now()) / 86_400_000)
+    const T = Math.max(0, (daysToExpiry - sliderDays) / 365)
+    const sigma = Math.max(0.001, leg.markVol * ivMult)
+    const g = bsGreeks(spot, leg.strike, T, sigma, 0, leg.type)
+    const scale = leg.qty * leg.contractSize * (leg.side === 'buy' ? 1 : -1)
+    return {
+      delta: acc.delta + g.delta * scale,
+      gamma: acc.gamma + g.gamma * scale,
+      theta: acc.theta + g.theta * scale,
+      vega:  acc.vega  + g.vega  * scale,
+    }
+  }, { delta: 0, gamma: 0, theta: 0, vega: 0 })
+}
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null
+  return (
+    <div className="bg-card border border-rim rounded shadow-sm px-3 py-2 text-xs">
+      <div className="font-mono text-ink mb-1">${Number(label).toLocaleString()}</div>
+      {payload.map((p: any) => (
+        <div key={p.name} style={{ color: p.color }}>
+          {p.name}: <span className="font-semibold">{p.value >= 0 ? '+' : ''}{p.value.toFixed(0)} USD</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+export default function PnLChart({ legs, spotPrice }: PnLChartProps) {
+  const { theme } = useTheme()
+  const isDark = theme === 'dark'
+
+  const [sliderDays, setSliderDays] = useState(0)
+  const [ivStress, setIvStress] = useState(0)
+  const [rangePercent, setRangePercent] = useState(30)
+
+  const activeLegExpiries = legs.filter(l => l.enabled).map(l => l.expiry)
+  const maxDays = activeLegExpiries.length > 0
+    ? Math.max(1, Math.max(...activeLegExpiries.map(exp =>
+        Math.ceil((new Date(exp).getTime() - Date.now()) / 86_400_000)
+      )))
+    : 30
+
+  useEffect(() => {
+    if (sliderDays > maxDays) setSliderDays(maxDays)
+  }, [maxDays])
+
+  const ivMult = 1 + ivStress / 100
+
+  const prices = useMemo(() => {
+    if (!spotPrice) return []
+    const lo = spotPrice * (1 - rangePercent / 100)
+    const hi = spotPrice * (1 + rangePercent / 100)
+    return Array.from({ length: PRICE_POINTS }, (_, i) => lo + (hi - lo) * i / (PRICE_POINTS - 1))
+  }, [spotPrice, rangePercent])
+
+  const todayPnL   = useMemo(() => computePnL(legs, prices, 0, ivMult), [legs, prices, ivMult])
+  const sliderPnL  = useMemo(() => computePnL(legs, prices, sliderDays, ivMult), [legs, prices, sliderDays, ivMult])
+  const expiryPnL  = useMemo(() => computePnL(legs, prices, maxDays, ivMult), [legs, prices, maxDays, ivMult])
+  const greeks     = useMemo(() => computePositionGreeks(legs, spotPrice, sliderDays, ivMult), [legs, spotPrice, sliderDays, ivMult])
+  const breakevens = useMemo(() => findBreakevens(prices, expiryPnL), [prices, expiryPnL])
+
+  const chartData = prices.map((p, i) => ({
+    price: Math.round(p),
+    today: parseFloat(todayPnL[i].toFixed(2)),
+    selected: parseFloat(sliderPnL[i].toFixed(2)),
+    expiry: parseFloat(expiryPnL[i].toFixed(2)),
+  }))
+
+  const sliderDate = new Date(Date.now() + sliderDays * 86_400_000)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const expiryDate = new Date(Date.now() + maxDays * 86_400_000)
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+
+  // Chart colors adapt to theme
+  const gridColor   = isDark ? '#3c3628' : '#f0ece4'
+  const axisColor   = isDark ? '#80685a' : '#b0a090'
+  const spotColor   = isDark ? '#6b5c4c' : '#94a3b8'
+  const zeroColor   = isDark ? '#3c3628' : '#e5e7eb'
+
+  if (legs.length === 0) {
+    return (
+      <div className="card text-center py-12 text-sm text-ink-3">
+        Add legs to see P&L simulation
+      </div>
+    )
+  }
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-ink">P&L Simulation</h2>
+        <div className="flex items-center gap-4 text-xs text-ink-2 flex-wrap">
+          <div className="flex items-center gap-1">
+            <span>Range</span>
+            {[5, 10, 20, 30, 50].map(p => (
+              <button key={p} onClick={() => setRangePercent(p)}
+                className={classNames('px-1.5 py-0.5 rounded border text-[10px]', {
+                  'bg-tone text-white border-tone': rangePercent === p,
+                  'text-ink-2 border-rim hover:border-ink-3': rangePercent !== p,
+                })}>
+                ±{p}%
+              </button>
+            ))}
+          </div>
+          <label className="flex items-center gap-2">
+            <span className="w-8">Date</span>
+            <input type="range" min={0} max={maxDays} value={sliderDays}
+              onChange={e => setSliderDays(Number(e.target.value))}
+              className="w-32 accent-amber-500" />
+            <span className="w-20 text-tone font-mono">
+              {sliderDays === 0 ? 'Today' : sliderDate}
+            </span>
+          </label>
+          <label className="flex items-center gap-2">
+            <span className="w-4">IV</span>
+            <input type="range" min={-80} max={300} value={ivStress}
+              onChange={e => setIvStress(Number(e.target.value))}
+              className="w-28 accent-amber-500" />
+            <span className="w-14 font-mono text-tone">
+              {ivStress >= 0 ? '+' : ''}{ivStress}%
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <ResponsiveContainer width="100%" height={280}>
+        <LineChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
+          <XAxis dataKey="price" tickFormatter={v => `$${(v/1000).toFixed(0)}k`}
+            tick={{ fontSize: 10, fill: axisColor }} stroke={gridColor} />
+          <YAxis tickFormatter={v => `${v >= 0 ? '+' : ''}${Number(v).toFixed(0)}`}
+            tick={{ fontSize: 10, fill: axisColor }} stroke={gridColor} width={55} />
+          <Tooltip content={<CustomTooltip />} />
+          <ReferenceLine y={0} stroke={zeroColor} strokeDasharray="4 4" />
+          <ReferenceLine x={Math.round(spotPrice)} stroke={spotColor} strokeDasharray="3 3"
+            label={{ value: 'Spot', position: 'top', fontSize: 9, fill: spotColor }} />
+          {breakevens.map((be, i) => (
+            <ReferenceLine key={i} x={Math.round(be)} stroke="#f59e0b" strokeDasharray="2 2"
+              label={{ value: `BE $${Math.round(be).toLocaleString()}`, position: 'insideTopLeft', fontSize: 9, fill: '#f59e0b' }} />
+          ))}
+          <Line type="monotone" dataKey="today" name="Today" stroke="#22c55e" dot={false} strokeWidth={1.5} strokeDasharray="4 3" />
+          <Line type="monotone" dataKey="selected" name={sliderDays === 0 ? 'Today' : sliderDate}
+            stroke="#22c55e" dot={false} strokeWidth={2} />
+          <Line type="monotone" dataKey="expiry" name={`Expiry (${expiryDate})`}
+            stroke="#ef4444" dot={false} strokeWidth={1.5} strokeDasharray="2 2" />
+          <Legend wrapperStyle={{ fontSize: 11, color: axisColor }} />
+        </LineChart>
+      </ResponsiveContainer>
+
+      <div className="mt-3 pt-3 border-t border-rim grid grid-cols-4 gap-2 text-xs text-center">
+        {[
+          { label: 'Delta', value: greeks.delta, dp: 3 },
+          { label: 'Gamma', value: greeks.gamma, dp: 5 },
+          { label: 'Theta', value: greeks.theta, dp: 1 },
+          { label: 'Vega',  value: greeks.vega,  dp: 1 },
+        ].map(g => (
+          <div key={g.label} className="bg-muted rounded p-2">
+            <div className="text-ink-2">{g.label}</div>
+            <div className={`font-mono font-semibold ${g.value >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+              {g.value >= 0 ? '+' : ''}{g.value.toFixed(g.dp)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
