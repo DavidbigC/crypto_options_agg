@@ -7,6 +7,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { BybitOptionsAPI } from './lib/bybit-api-axios.js';
+import { bybitWsTickerCache, bybitWsSpotCache, startBybitWS, setBybitWsUpdateCallback } from './lib/bybit-ws.js'
 import { mockSpotPrices, getMockOptionsData } from './lib/mock-data.js';
 import {
   calculateTimeToExpiration,
@@ -559,45 +560,8 @@ async function fetchOkxSpotPrice(instId) {
 }
 
 // ─── Bybit Background Cache ───────────────────────────────────────────────────
-const bybitTickerCache = {
-  BTC: [],
-  ETH: [],
-  SOL: [],
-};
-const bybitSpotCache = {
-  BTC: 0,
-  ETH: 0,
-  SOL: 0,
-};
-
-async function pollBybitTickers(baseCoin) {
-  try {
-    const [spot, tickers] = await Promise.all([
-      bybitApi.getSpotPrice(`${baseCoin}USDT`),
-      bybitApi.getOptionsTickers(baseCoin),
-    ]);
-    if (spot > 0) bybitSpotCache[baseCoin] = spot;
-    if (Array.isArray(tickers) && tickers.length > 0) bybitTickerCache[baseCoin] = tickers;
-    const bybitData = buildBybitResponse(baseCoin)
-    if (bybitData) {
-      emitSSE('bybit',    baseCoin, bybitData)
-      emitSSE('combined', baseCoin, buildCombinedResponse(baseCoin))
-    }
-  } catch (err) {
-    console.error(`Bybit poll error (${baseCoin}):`, err.message);
-  }
-}
-
-function startBybitPolling() {
-  const COINS = Object.keys(bybitTickerCache);
-  COINS.forEach((coin, i) => {
-    setTimeout(() => {
-      pollBybitTickers(coin);
-      setInterval(() => pollBybitTickers(coin), 1000);
-    }, i * 1500);
-  });
-  console.log('Bybit ticker polling started');
-}
+const bybitTickerCache = bybitWsTickerCache
+const bybitSpotCache   = bybitWsSpotCache
 
 // In-memory caches populated by background polling — shared across all requests
 const okxTickerCache = {
@@ -743,14 +707,14 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
   if (!sseClients.has(key)) sseClients.set(key, new Set())
   sseClients.get(key).add(res)
 
-  if (exchange === 'derive') addDeriveViewer(coin)
+  // if (exchange === 'derive') addDeriveViewer(coin)  // DISABLED for perf testing
 
   const heartbeat = setInterval(() => res.write(': ping\n\n'), 5_000)
 
   req.on('close', () => {
     clearInterval(heartbeat)
     sseClients.get(key)?.delete(res)
-    if (exchange === 'derive') removeDeriveViewer(coin)
+    // if (exchange === 'derive') removeDeriveViewer(coin)  // DISABLED for perf testing
   })
 })
 
@@ -787,24 +751,31 @@ app.get('/api/derive/debug/:coin', (req, res) => {
 // ─── Start OKX WebSocket + Ticker Polling ────────────────────────────────────
 startOkxWebSocket();
 startOkxTickerPolling();
-startBybitPolling();
-startDeribitPolling();
-startDeribitWS();
+startBybitWS()
+// startDeribitPolling();  // DISABLED for perf testing
+// startDeribitWS();       // DISABLED for perf testing
 // Derive WS is demand-driven — started by addDeriveViewer() when first SSE client connects
 
 // ─── SSE Push Callbacks ───────────────────────────────────────────────────────
-const emitDerive  = makeThrottledEmitter('derive',  buildDeriveResponse,   250)
-const emitDeribit = makeThrottledEmitter('deribit', buildDeribitResponse,  500)
+// const emitDerive  = makeThrottledEmitter('derive',  buildDeriveResponse,   250)  // DISABLED for perf testing
+// const emitDeribit = makeThrottledEmitter('deribit', buildDeribitResponse,  500)  // DISABLED for perf testing
 const emitCombinedDebounced = makeThrottledEmitter('combined', buildCombinedResponse, 500)
 
-setDeriveUpdateCallback((currency) => {
-  emitDerive(currency)
-  emitCombinedDebounced(currency)
-})
+// setDeriveUpdateCallback((currency) => {  // DISABLED for perf testing
+//   emitDerive(currency)
+//   emitCombinedDebounced(currency)
+// })
 
-setDeribitUpdateCallback((currency) => {
-  emitDeribit(currency)
-  emitCombinedDebounced(currency)
+// setDeribitUpdateCallback((currency) => {  // DISABLED for perf testing
+//   emitDeribit(currency)
+//   emitCombinedDebounced(currency)
+// })
+
+const emitBybit = makeThrottledEmitter('bybit', buildBybitResponse, 100)
+
+setBybitWsUpdateCallback((coin) => {
+  emitBybit(coin)
+  emitCombinedDebounced(coin)
 })
 
 // Error handling middleware
