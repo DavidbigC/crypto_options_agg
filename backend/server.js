@@ -204,14 +204,23 @@ function buildCombinedResponse(baseCoin) {
 
 // ─── SSE Infrastructure ───────────────────────────────────────────────────────
 
-const sseClients = new Map() // key: 'exchange:coin' → Set<ServerResponse>
+const sseClients = new Map() // key: 'exchange:coin' → Map<ServerResponse, {expiry}>
+
+// Filter full response down to a single expiry's data (keeps metadata intact).
+// Reduces payload from ~220KB to ~30KB when a client is watching one expiry.
+function filterByExpiry(data, expiry) {
+  if (!expiry || !data?.data) return data
+  return { ...data, data: { [expiry]: data.data[expiry] ?? { calls: [], puts: [] } } }
+}
 
 function emitSSE(exchange, coin, data) {
   const key     = `${exchange}:${coin}`
   const clients = sseClients.get(key)
   if (!clients?.size) return
-  const payload = `data: ${JSON.stringify(data)}\n\n`
-  for (const res of clients) res.write(payload)
+  for (const [res, opts] of clients.entries()) {
+    const filtered = opts.expiry ? filterByExpiry(data, opts.expiry) : data
+    res.write(`data: ${JSON.stringify(filtered)}\n\n`)
+  }
 }
 
 function makeThrottledEmitter(exchange, getDataFn, ms) {
@@ -689,6 +698,7 @@ app.get('/api/combined/options/:baseCoin', (req, res) => {
 app.get('/api/stream/:exchange/:coin', (req, res) => {
   const exchange = req.params.exchange
   const coin     = req.params.coin.toUpperCase()
+  const expiry   = req.query.expiry || null  // optional: filter pushes to one expiry
 
   res.setHeader('Content-Type',  'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
@@ -701,11 +711,14 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
 
   // Send current snapshot immediately so the client has data before first push
   const snapshot = getDataForExchange(exchange, coin)
-  if (snapshot) res.write(`data: ${JSON.stringify(snapshot)}\n\n`)
+  if (snapshot) {
+    const filtered = expiry ? filterByExpiry(snapshot, expiry) : snapshot
+    res.write(`data: ${JSON.stringify(filtered)}\n\n`)
+  }
 
   const key = `${exchange}:${coin}`
-  if (!sseClients.has(key)) sseClients.set(key, new Set())
-  sseClients.get(key).add(res)
+  if (!sseClients.has(key)) sseClients.set(key, new Map())
+  sseClients.get(key).set(res, { expiry })
 
   // if (exchange === 'derive') addDeriveViewer(coin)  // DISABLED for perf testing
 

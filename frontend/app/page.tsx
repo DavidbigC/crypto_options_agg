@@ -28,18 +28,30 @@ export default function HomePage() {
   useEffect(() => {
     fetchVersion.current++
     const version = fetchVersion.current
-    selectedExpirationRef.current = ''
-    setLoading(true)
+    const isExpiryChange = !!selectedExpirationRef.current
+    if (!isExpiryChange) {
+      selectedExpirationRef.current = ''
+      setLoading(true)
+    }
 
     const coin = (ex: Exchange) => ex === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
-    const evtSource = new EventSource(`/api/stream/${exchange}/${coin(exchange)}`)
+    const expiryParam = selectedExpiration ? `?expiry=${selectedExpiration}` : ''
+    const evtSource = new EventSource(`/api/stream/${exchange}/${coin(exchange)}${expiryParam}`)
 
     evtSource.onmessage = (e) => {
       if (version !== fetchVersion.current) { evtSource.close(); return }
       try {
         const data = JSON.parse(e.data)
         if (!data || data.error || !data.data) return
-        setOptionsData(data)
+        // Merge incoming expiry data into existing optionsData rather than replacing entirely.
+        // Each SSE push now only contains one expiry's contracts (~30KB vs ~220KB).
+        setOptionsData(prev => {
+          const merged = prev ? { ...prev, data: { ...prev.data, ...data.data } } : data
+          merged.spotPrice = data.spotPrice ?? merged.spotPrice
+          if (data.expirations?.length) merged.expirations = data.expirations
+          if (data.expirationCounts) merged.expirationCounts = data.expirationCounts
+          return merged
+        })
         setSpotPrice(data.spotPrice ?? 0)
         setLastUpdated(new Date())
         setLoading(false)
@@ -55,7 +67,7 @@ export default function HomePage() {
     }
 
     return () => evtSource.close()
-  }, [selectedCrypto, exchange])
+  }, [selectedCrypto, exchange, selectedExpiration])
 
   const handleCryptoChange = (crypto: 'BTC' | 'ETH' | 'SOL') => {
     fetchVersion.current++
