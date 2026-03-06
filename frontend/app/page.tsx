@@ -73,6 +73,7 @@ export default function HomePage() {
   }
 
   const chainData = selectedExpiration && optionsData?.data?.[selectedExpiration]
+  const effectiveSpotPrice = chainData?.forwardPrice || spotPrice
 
   return (
     <div className="min-h-screen bg-surface">
@@ -108,14 +109,14 @@ export default function HomePage() {
           exchange === 'combined' ? (
             <CombinedOptionsChain
               data={chainData as any}
-              spotPrice={spotPrice}
+              spotPrice={effectiveSpotPrice}
               expiration={selectedExpiration}
               lastUpdated={lastUpdated}
             />
           ) : (
             <OptionsChain
               data={chainData}
-              spotPrice={spotPrice}
+              spotPrice={effectiveSpotPrice}
               expiration={selectedExpiration}
               lastUpdated={lastUpdated}
               exchange={exchange}

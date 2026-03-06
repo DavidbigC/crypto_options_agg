@@ -44,6 +44,7 @@ export interface OptionContract {
 export interface OptionsChainData {
   calls: OptionContract[]
   puts: OptionContract[]
+  forwardPrice?: number  // per-expiry forward/futures price (Bybit only)
 }
 
 export interface OptionsData {

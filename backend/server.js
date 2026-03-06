@@ -65,7 +65,7 @@ function buildBybitResponse(baseCoin) {
       markPrice:         parseFloat(ticker.markPrice || 0),
     }
     const expiry = parsed.expiryDate
-    if (!optionsByDate[expiry]) optionsByDate[expiry] = { calls: [], puts: [] }
+    if (!optionsByDate[expiry]) optionsByDate[expiry] = { calls: [], puts: [], forwardPrice: parseFloat(ticker.underlyingPrice || 0) }
     if (parsed.optionType.toLowerCase() === 'call') optionsByDate[expiry].calls.push(optionData)
     else optionsByDate[expiry].puts.push(optionData)
   }
