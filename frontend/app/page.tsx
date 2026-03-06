@@ -31,7 +31,7 @@ export default function HomePage() {
     selectedExpirationRef.current = ''
     setLoading(true)
 
-    const coin = ex => ex === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
+    const coin = (ex: Exchange) => ex === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
     const evtSource = new EventSource(`/api/stream/${exchange}/${coin(exchange)}`)
 
     evtSource.onmessage = (e) => {
