@@ -172,7 +172,7 @@ export default function OptionsChain({ data, spotPrice, expiration, lastUpdated,
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-xs">
+        <table className="w-full text-xs tabular-nums">
           <thead>
             <tr className="border-b border-rim">
               <th colSpan={8} className="text-center py-1 text-green-700 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 text-xs">CALLS</th>

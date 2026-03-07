@@ -51,25 +51,66 @@ async function fetchAllInstruments() {
   return all
 }
 
-// Normalize WS ticker fields to match REST field names used in buildBybitResponse
+// Normalize WS ticker fields to match REST field names used in buildBybitResponse.
+// Only includes fields that are actually present in the message (critical for delta updates).
 function normalize(data) {
-  return {
-    symbol:            data.symbol,
-    bid1Price:         data.bidPrice  ?? '0',
-    ask1Price:         data.askPrice  ?? '0',
-    lastPrice:         data.lastPrice ?? '0',
-    volume24h:         data.volume24h ?? '0',
-    bid1Size:          data.bidSize   ?? '0',
-    ask1Size:          data.askSize   ?? '0',
-    delta:             data.delta     ?? '0',
-    gamma:             data.gamma     ?? '0',
-    theta:             data.theta     ?? '0',
-    vega:              data.vega      ?? '0',
-    impliedVolatility: data.markPriceIv ?? '0',
-    openInterest:      data.openInterest ?? '0',
-    markPrice:         data.markPrice ?? '0',
-    underlyingPrice:   data.underlyingPrice ?? '0',
-  }
+  const out = {}
+  if (data.symbol            !== undefined) out.symbol            = data.symbol
+  if (data.bidPrice          !== undefined) out.bid1Price         = data.bidPrice
+  if (data.askPrice          !== undefined) out.ask1Price         = data.askPrice
+  if (data.lastPrice         !== undefined) out.lastPrice         = data.lastPrice
+  if (data.volume24h         !== undefined) out.volume24h         = data.volume24h
+  if (data.bidSize           !== undefined) out.bid1Size          = data.bidSize
+  if (data.askSize           !== undefined) out.ask1Size          = data.askSize
+  if (data.delta             !== undefined) out.delta             = data.delta
+  if (data.gamma             !== undefined) out.gamma             = data.gamma
+  if (data.theta             !== undefined) out.theta             = data.theta
+  if (data.vega              !== undefined) out.vega              = data.vega
+  if (data.markPriceIv       !== undefined) out.impliedVolatility = data.markPriceIv
+  if (data.openInterest      !== undefined) out.openInterest      = data.openInterest
+  if (data.markPrice         !== undefined) out.markPrice         = data.markPrice
+  if (data.underlyingPrice   !== undefined) out.underlyingPrice   = data.underlyingPrice
+  return out
+}
+
+async function warmCache() {
+  console.log('Bybit WS: warming cache from REST...')
+  await Promise.all(COINS.map(async (coin) => {
+    try {
+      const url = `${BYBIT_REST}/market/tickers?category=option&baseCoin=${coin}`
+      const res = await fetch(url, { headers: { 'User-Agent': 'bybit-options-viewer/1.0' } })
+      const json = await res.json()
+      const list = json.result?.list ?? []
+      let spotSet = false
+      for (const t of list) {
+        bybitWsTickerCache[coin][t.symbol] = {
+          symbol:            t.symbol,
+          bid1Price:         t.bid1Price        ?? '0',
+          ask1Price:         t.ask1Price        ?? '0',
+          lastPrice:         t.lastPrice        ?? '0',
+          volume24h:         t.volume24h        ?? '0',
+          bid1Size:          t.bid1Size         ?? '0',
+          ask1Size:          t.ask1Size         ?? '0',
+          delta:             t.delta            ?? '0',
+          gamma:             t.gamma            ?? '0',
+          theta:             t.theta            ?? '0',
+          vega:              t.vega             ?? '0',
+          impliedVolatility: t.markIv           ?? '0',
+          openInterest:      t.openInterest     ?? '0',
+          markPrice:         t.markPrice        ?? '0',
+          underlyingPrice:   t.underlyingPrice  ?? '0',
+        }
+        if (!spotSet) {
+          const spot = parseFloat(t.indexPrice)
+          if (spot > 0) { bybitWsSpotCache[coin] = spot; spotSet = true }
+        }
+      }
+      console.log(`Bybit WS: warm cache ${coin} — ${list.length} tickers`)
+      if (_updateCallback) _updateCallback(coin)
+    } catch (err) {
+      console.error(`Bybit WS: warm cache error (${coin}):`, err.message)
+    }
+  }))
 }
 
 export function startBybitWS() {
@@ -78,6 +119,8 @@ export function startBybitWS() {
   let instruments = []  // [{ coin, symbol }]
   let heartbeatTimer = null
   let refreshTimer = null
+
+  warmCache()
 
   async function connect() {
     console.log('Bybit WS: fetching instruments...')
@@ -130,6 +173,13 @@ export function startBybitWS() {
       }, INSTRUMENT_REFRESH_MS)
     })
 
+    // Diagnostic counters — log message rate every 10s
+    const msgCount = { BTC: 0, ETH: 0, SOL: 0 }
+    const diagTimer = setInterval(() => {
+      console.log(`Bybit WS msgs/10s — BTC:${msgCount.BTC} ETH:${msgCount.ETH} SOL:${msgCount.SOL}`)
+      msgCount.BTC = 0; msgCount.ETH = 0; msgCount.SOL = 0
+    }, 10_000)
+
     ws.on('message', (raw) => {
       let msg
       try { msg = JSON.parse(raw) } catch { return }
@@ -142,8 +192,12 @@ export function startBybitWS() {
         const coin = msg.data.symbol?.split('-')[0]
         if (!coin || !bybitWsTickerCache[coin]) return
 
-        // O(1) update — no array rebuild
-        bybitWsTickerCache[coin][msg.data.symbol] = normalize(msg.data)
+        if (msgCount[coin] !== undefined) msgCount[coin]++
+
+        // Merge delta fields into existing entry — Bybit sends partial updates where
+        // only changed fields are included; replacing would zero out unchanged fields.
+        const prev = bybitWsTickerCache[coin][msg.data.symbol] ?? {}
+        bybitWsTickerCache[coin][msg.data.symbol] = { ...prev, ...normalize(msg.data) }
 
         // Update spot from indexPrice (consistent across all expiries)
         const spot = parseFloat(msg.data.indexPrice)
@@ -152,6 +206,8 @@ export function startBybitWS() {
         if (_updateCallback) _updateCallback(coin)
       }
     })
+
+    ws.on('close', () => { clearInterval(diagTimer) })
 
     ws.on('close', () => {
       clearInterval(heartbeatTimer)

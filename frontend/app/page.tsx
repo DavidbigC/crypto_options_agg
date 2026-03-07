@@ -36,7 +36,7 @@ export default function HomePage() {
 
     const coin = (ex: Exchange) => ex === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
     const expiryParam = selectedExpiration ? `?expiry=${selectedExpiration}` : ''
-    const evtSource = new EventSource(`/api/stream/${exchange}/${coin(exchange)}${expiryParam}`)
+    const evtSource = new EventSource(`http://localhost:3500/api/stream/${exchange}/${coin(exchange)}${expiryParam}`)
 
     evtSource.onmessage = (e) => {
       if (version !== fetchVersion.current) { evtSource.close(); return }

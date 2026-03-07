@@ -7,7 +7,6 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { BybitOptionsAPI } from './lib/bybit-api-axios.js';
-import { bybitWsTickerCache, bybitWsSpotCache, startBybitWS, setBybitWsUpdateCallback } from './lib/bybit-ws.js'
 import { mockSpotPrices, getMockOptionsData } from './lib/mock-data.js';
 import {
   calculateTimeToExpiration,
@@ -217,9 +216,15 @@ function emitSSE(exchange, coin, data) {
   const key     = `${exchange}:${coin}`
   const clients = sseClients.get(key)
   if (!clients?.size) return
+  const payload = JSON.stringify(data)
   for (const [res, opts] of clients.entries()) {
-    const filtered = opts.expiry ? filterByExpiry(data, opts.expiry) : data
-    res.write(`data: ${JSON.stringify(filtered)}\n\n`)
+    try {
+      const out = opts.expiry ? `data: ${JSON.stringify(filterByExpiry(data, opts.expiry))}\n\n` : `data: ${payload}\n\n`
+      res.write(out)
+    } catch (err) {
+      console.error(`SSE write error (${key}), removing client:`, err.message)
+      clients.delete(res)
+    }
   }
 }
 
@@ -526,6 +531,47 @@ app.get('/api/spots', async (req, res) => {
   }
 });
 
+// Snapshot of what the frontend receives for a given coin/expiry
+app.get('/api/bybit/snapshot/:coin', (req, res) => {
+  const coin   = req.params.coin.toUpperCase()
+  const expiry = req.query.expiry
+  const data   = buildBybitResponse(coin)
+  if (!data) return res.status(503).json({ error: 'Cache empty — wait for WS warm-up' })
+  res.json(expiry ? filterByExpiry(data, expiry) : data)
+})
+
+app.get('/api/debug/bybit', (req, res) => {
+  const coin    = (req.query.coin || 'BTC').toUpperCase()
+  const expiry  = req.query.expiry  // e.g. 2026-03-08
+  const cache   = bybitTickerCache[coin] ?? {}
+  const symbols = Object.keys(cache)
+  const expiries = [...new Set(
+    symbols.map(s => bybitApi.parseOptionSymbol(s)?.expiryDate).filter(Boolean)
+  )].sort()
+  const forExpiry = expiry ? symbols.filter(s => {
+    const p = bybitApi.parseOptionSymbol(s)
+    return p?.expiryDate === expiry
+  }) : []
+  const sseKey     = `bybit:${coin}`
+  const sseClients_ = sseClients.get(sseKey)
+  const sseCount   = sseClients_?.size ?? 0
+  const sseExpiries = sseClients_ ? [...sseClients_.values()].map(o => o.expiry) : []
+  res.json({
+    coin,
+    cacheSymbols: symbols.length,
+    spot: bybitSpotCache[coin],
+    expiriesInCache: expiries,
+    sseClients: sseCount,
+    sseClientExpiries: sseExpiries,
+    ...(expiry ? {
+      queryExpiry: expiry,
+      symbolsForExpiry: forExpiry.length,
+      sampleSymbols: forExpiry.slice(0, 3),
+      sampleData: forExpiry.slice(0, 2).map(s => cache[s]),
+    } : {}),
+  })
+})
+
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -568,9 +614,57 @@ async function fetchOkxSpotPrice(instId) {
   }
 }
 
-// ─── Bybit Background Cache ───────────────────────────────────────────────────
-const bybitTickerCache = bybitWsTickerCache
-const bybitSpotCache   = bybitWsSpotCache
+// ─── Bybit Background Cache (REST polling) ────────────────────────────────────
+const bybitTickerCache = { BTC: {}, ETH: {}, SOL: {} }
+const bybitSpotCache   = { BTC: 0,   ETH: 0,   SOL: 0 }
+
+function normalizeRestTicker(t) {
+  return {
+    symbol:            t.symbol,
+    bid1Price:         t.bid1Price       ?? '0',
+    ask1Price:         t.ask1Price       ?? '0',
+    lastPrice:         t.lastPrice       ?? '0',
+    volume24h:         t.volume24h       ?? '0',
+    bid1Size:          t.bid1Size        ?? '0',
+    ask1Size:          t.ask1Size        ?? '0',
+    delta:             t.delta           ?? '0',
+    gamma:             t.gamma           ?? '0',
+    theta:             t.theta           ?? '0',
+    vega:              t.vega            ?? '0',
+    impliedVolatility: t.markIv          ?? '0',
+    openInterest:      t.openInterest    ?? '0',
+    markPrice:         t.markPrice       ?? '0',
+    underlyingPrice:   t.underlyingPrice ?? '0',
+  }
+}
+
+async function pollBybit(coin) {
+  try {
+    const url  = `https://api.bybit.com/v5/market/tickers?category=option&baseCoin=${coin}`
+    const res  = await fetch(url, { headers: { 'User-Agent': 'bybit-options-viewer/1.0' } })
+    const json = await res.json()
+    const list = json.result?.list ?? []
+    if (!list.length) return
+    for (const t of list) bybitTickerCache[coin][t.symbol] = normalizeRestTicker(t)
+    const spot = parseFloat(list[0].indexPrice)
+    if (spot > 0) bybitSpotCache[coin] = spot
+    const data = buildBybitResponse(coin)
+    if (data) {
+      emitSSE('bybit',    coin, data)
+      emitSSE('combined', coin, buildCombinedResponse(coin))
+    }
+  } catch (err) {
+    console.error(`Bybit REST poll error (${coin}):`, err.message)
+  }
+}
+
+function startBybitPolling() {
+  for (const coin of ['BTC', 'ETH', 'SOL']) {
+    pollBybit(coin)
+    setInterval(() => pollBybit(coin), 1000)
+  }
+  console.log('Bybit REST polling started (1s per coin)')
+}
 
 // In-memory caches populated by background polling — shared across all requests
 const okxTickerCache = {
@@ -705,6 +799,8 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
   res.setHeader('Connection',    'keep-alive')
   res.setHeader('X-Accel-Buffering', 'no')  // disable nginx/proxy buffering
   res.flushHeaders()
+  // Disable Nagle's algorithm so each SSE write is sent immediately
+  res.socket?.setNoDelay(true)
 
   // Tell the browser to reconnect after 1s instead of the default 3s
   res.write('retry: 1000\n\n')
@@ -720,14 +816,14 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
   if (!sseClients.has(key)) sseClients.set(key, new Map())
   sseClients.get(key).set(res, { expiry })
 
-  // if (exchange === 'derive') addDeriveViewer(coin)  // DISABLED for perf testing
+  if (exchange === 'derive') addDeriveViewer(coin)
 
   const heartbeat = setInterval(() => res.write(': ping\n\n'), 5_000)
 
   req.on('close', () => {
     clearInterval(heartbeat)
     sseClients.get(key)?.delete(res)
-    // if (exchange === 'derive') removeDeriveViewer(coin)  // DISABLED for perf testing
+    if (exchange === 'derive') removeDeriveViewer(coin)
   })
 })
 
@@ -764,32 +860,28 @@ app.get('/api/derive/debug/:coin', (req, res) => {
 // ─── Start OKX WebSocket + Ticker Polling ────────────────────────────────────
 startOkxWebSocket();
 startOkxTickerPolling();
-startBybitWS()
-// startDeribitPolling();  // DISABLED for perf testing
-// startDeribitWS();       // DISABLED for perf testing
+startBybitPolling()
+startDeribitPolling()
+startDeribitWS()
 // Derive WS is demand-driven — started by addDeriveViewer() when first SSE client connects
 
 // ─── SSE Push Callbacks ───────────────────────────────────────────────────────
-// const emitDerive  = makeThrottledEmitter('derive',  buildDeriveResponse,   250)  // DISABLED for perf testing
-// const emitDeribit = makeThrottledEmitter('deribit', buildDeribitResponse,  500)  // DISABLED for perf testing
-const emitCombinedDebounced = makeThrottledEmitter('combined', buildCombinedResponse, 500)
+const emitDeribit = makeThrottledEmitter('deribit', buildDeribitResponse, 500)
+const emitDerive  = makeThrottledEmitter('derive',  buildDeriveResponse,  250)
 
-// setDeriveUpdateCallback((currency) => {  // DISABLED for perf testing
-//   emitDerive(currency)
-//   emitCombinedDebounced(currency)
-// })
+// Deribit WS fires on Greek updates — emit to deribit SSE clients
+setDeribitUpdateCallback((coin) => emitDeribit(coin))
 
-// setDeribitUpdateCallback((currency) => {  // DISABLED for perf testing
-//   emitDeribit(currency)
-//   emitCombinedDebounced(currency)
-// })
+// Deribit REST polls every 5s but has no callback — push after each poll cycle
+setInterval(() => {
+  for (const coin of ['BTC', 'ETH', 'SOL']) {
+    const data = buildDeribitResponse(coin)
+    if (data) emitSSE('deribit', coin, data)
+  }
+}, 5000)
 
-const emitBybit = makeThrottledEmitter('bybit', buildBybitResponse, 100)
-
-setBybitWsUpdateCallback((coin) => {
-  emitBybit(coin)
-  emitCombinedDebounced(coin)
-})
+// Derive WS fires on updates via setDeriveUpdateCallback
+setDeriveUpdateCallback((coin) => emitDerive(coin))
 
 // Error handling middleware
 app.use((err, req, res, next) => {
