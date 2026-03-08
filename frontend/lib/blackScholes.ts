@@ -55,6 +55,28 @@ export function bsGreeks(
   return { delta, gamma, theta, vega }
 }
 
+/** Back-calculate implied volatility from a market price via bisection */
+export function impliedVol(
+  S: number, K: number, T: number,
+  targetPrice: number,
+  type: 'call' | 'put',
+  r = 0,
+): number {
+  if (T <= 0 || targetPrice <= 0 || S <= 0) return 0.5
+  // Clamp target to valid range (intrinsic..upper bound)
+  const intrinsic = Math.max(0, type === 'call' ? S - K : K - S)
+  if (targetPrice <= intrinsic) return 0.001
+  let lo = 0.001, hi = 20.0
+  for (let i = 0; i < 100; i++) {
+    const mid = (lo + hi) / 2
+    const price = bsPrice(S, K, T, mid, r, type)
+    if (Math.abs(price - targetPrice) < 0.01) return mid
+    if (price < targetPrice) lo = mid
+    else hi = mid
+  }
+  return (lo + hi) / 2
+}
+
 /** Find zero-crossings (breakevens) in a pnl array paired with prices */
 export function findBreakevens(prices: number[], pnls: number[]): number[] {
   const result: number[] = []
@@ -65,4 +87,15 @@ export function findBreakevens(prices: number[], pnls: number[]): number[] {
     }
   }
   return result
+}
+
+/**
+ * Break-even daily move for a long option position.
+ * theta: USD/day (negative value from backend)
+ * gamma: per-$1 spot move
+ * Returns: minimum $ daily move to break even, or null if inputs invalid
+ */
+export function calcBreakEven(thetaUSD: number, gamma: number): number | null {
+  if (!gamma || gamma <= 0 || !thetaUSD) return null
+  return Math.sqrt(2 * Math.abs(thetaUSD) / gamma)
 }
