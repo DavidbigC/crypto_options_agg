@@ -53,7 +53,8 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
       const putAsk  = (put  as any).bestAsk ?? put.ask
       if (!callAsk || !putAsk) continue
 
-      const cost  = callAsk + putAsk
+      const priceMultiplier = exchange === 'okx' && spotPrice > 0 ? spotPrice : 1
+      const cost  = (callAsk + putAsk) * priceMultiplier
       const gamma = (call.gamma || 0) + (put.gamma || 0)
       const theta = (call.theta || 0) + (put.theta || 0)
       const be    = calcBreakEven(theta, gamma)
