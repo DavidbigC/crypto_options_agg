@@ -1,12 +1,19 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import Header from '@/components/Header'
 import CryptocurrencyTabs from '@/components/CryptocurrencyTabs'
 import ExpirationTabs from '@/components/ExpirationTabs'
 import OptionsChain from '@/components/OptionsChain'
 import CombinedOptionsChain from '@/components/CombinedOptionsChain'
+import ArbPanel from '@/components/ArbPanel'
+import GammaScreener from '@/components/GammaScreener'
+import classNames from 'classnames'
 import { OptionsData, Exchange } from '@/types/options'
+type ExchangeKey = 'bybit' | 'okx' | 'deribit'
+const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit']
+import { findBoxSpreads, BoxSpread, findAllArbs, ArbOpportunity, FutureData } from '@/lib/strategies'
+import { filterExpirations } from '@/lib/filterExpirations'
 
 const OKX_FAMILY_MAP: Record<string, string> = {
   BTC: 'BTC-USD',
@@ -22,6 +29,9 @@ export default function HomePage() {
   const [spotPrice, setSpotPrice] = useState<number>(0)
   const [loading, setLoading] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
+  const [activeExchanges, setActiveExchanges] = useState<Set<ExchangeKey>>(new Set(ALL_EXCHANGES))
+  const [futures, setFutures] = useState<FutureData[]>([])
+  const [showGammaScanner, setShowGammaScanner] = useState(false)
   const fetchVersion = useRef(0)
   const selectedExpirationRef = useRef('')
 
@@ -69,6 +79,24 @@ export default function HomePage() {
     return () => evtSource.close()
   }, [selectedCrypto, exchange, selectedExpiration])
 
+  // Futures data for PCP hedge price selection
+  useEffect(() => {
+    const load = () => {
+      fetch(`http://localhost:3500/api/futures/${selectedCrypto}`)
+        .then(r => r.json())
+        .then(d => {
+          const all: FutureData[] = (d.futures ?? []).filter(
+            (f: FutureData) => f.symbol.toUpperCase().includes(selectedCrypto.toUpperCase())
+          )
+          setFutures(all)
+        })
+        .catch(() => {})
+    }
+    load()
+    const id = setInterval(load, 15_000)
+    return () => clearInterval(id)
+  }, [selectedCrypto])
+
   const handleCryptoChange = (crypto: 'BTC' | 'ETH' | 'SOL') => {
     fetchVersion.current++
     selectedExpirationRef.current = ''
@@ -84,7 +112,56 @@ export default function HomePage() {
     setOptionsData(null)
   }
 
-  const chainData = selectedExpiration && optionsData?.data?.[selectedExpiration]
+  const expiryExchangeCounts = useMemo(() => {
+    if (exchange !== 'combined' || !optionsData) return {} as Record<string, { bybit: number; okx: number; deribit: number }>
+    const result: Record<string, { bybit: number; okx: number; deribit: number }> = {}
+    for (const [expiry, chainData] of Object.entries(optionsData.data)) {
+      const counts = { bybit: 0, okx: 0, deribit: 0 }
+      const contracts = [...((chainData as any).calls ?? []), ...((chainData as any).puts ?? [])]
+      for (const c of contracts) {
+        if (c.prices?.bybit?.bid > 0  || c.prices?.bybit?.ask > 0)  counts.bybit++
+        if (c.prices?.okx?.bid > 0    || c.prices?.okx?.ask > 0)    counts.okx++
+        if (c.prices?.deribit?.bid > 0 || c.prices?.deribit?.ask > 0) counts.deribit++
+      }
+      result[expiry] = counts
+    }
+    return result
+  }, [exchange, optionsData])
+
+  const boxSpreads = useMemo<BoxSpread[]>(() => {
+    if (exchange !== 'combined' || !optionsData || !spotPrice) return []
+    return findBoxSpreads(optionsData, spotPrice, activeExchanges)
+  }, [exchange, optionsData, spotPrice, activeExchanges])
+
+  const allArbs = useMemo<ArbOpportunity[]>(() => {
+    if (exchange !== 'combined' || !optionsData || !spotPrice) return []
+    return findAllArbs(optionsData, spotPrice, activeExchanges, futures)
+  }, [exchange, optionsData, spotPrice, activeExchanges, futures])
+
+  const arbExpiryStrategies = useMemo(() => {
+    const map = new Map<string, Set<string>>()
+    for (const b of boxSpreads) {
+      if (!map.has(b.expiry)) map.set(b.expiry, new Set())
+      map.get(b.expiry)!.add(b.type === 'long' ? 'box_long' : 'box_short')
+    }
+    for (const a of allArbs) {
+      if (!map.has(a.expiry)) map.set(a.expiry, new Set())
+      map.get(a.expiry)!.add(a.strategy)
+    }
+    return map
+  }, [boxSpreads, allArbs])
+
+  const boxSpreadsForExpiry = useMemo(
+    () => boxSpreads.filter(b => b.expiry === selectedExpiration),
+    [boxSpreads, selectedExpiration]
+  )
+
+  const arbsForExpiry = useMemo(
+    () => allArbs.filter(a => a.expiry === selectedExpiration),
+    [allArbs, selectedExpiration]
+  )
+
+  const chainData = selectedExpiration ? optionsData?.data?.[selectedExpiration] : undefined
   const effectiveSpotPrice = chainData?.forwardPrice || spotPrice
 
   return (
@@ -103,14 +180,36 @@ export default function HomePage() {
           {optionsData?.expirations && (
             <div className="flex-1 min-w-0">
               <ExpirationTabs
-                expirations={optionsData.expirations}
+                expirations={filterExpirations(optionsData.expirations)}
                 selected={selectedExpiration}
                 onSelect={(exp) => { selectedExpirationRef.current = exp; setSelectedExpiration(exp) }}
                 optionsCounts={optionsData.expirationCounts}
+                arbExpiryStrategies={arbExpiryStrategies}
+                expiryExchangeCounts={expiryExchangeCounts}
               />
             </div>
           )}
+          <button
+            onClick={() => setShowGammaScanner(v => !v)}
+            className={classNames(
+              'flex-shrink-0 self-start px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
+              showGammaScanner
+                ? 'bg-violet-600 text-white border-violet-600'
+                : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
+            )}
+          >
+            Γ Scanner
+          </button>
         </div>
+
+        {showGammaScanner && (
+          <GammaScreener
+            optionsData={optionsData}
+            spotPrice={spotPrice}
+            coin={selectedCrypto}
+            exchange={exchange}
+          />
+        )}
 
         {/* Options chain */}
         {loading ? (
@@ -119,12 +218,35 @@ export default function HomePage() {
           </div>
         ) : chainData ? (
           exchange === 'combined' ? (
-            <CombinedOptionsChain
-              data={chainData as any}
-              spotPrice={effectiveSpotPrice}
-              expiration={selectedExpiration}
-              lastUpdated={lastUpdated}
-            />
+            <>
+              <CombinedOptionsChain
+                data={chainData as any}
+                spotPrice={effectiveSpotPrice}
+                expiration={selectedExpiration}
+                lastUpdated={lastUpdated}
+                boxSpreads={boxSpreadsForExpiry}
+                activeExchanges={activeExchanges}
+                onToggleExchange={(ex) => setActiveExchanges(prev => {
+                  const next = new Set(prev)
+                  if (next.has(ex as ExchangeKey)) {
+                    if (next.size === 1) return prev
+                    next.delete(ex as ExchangeKey)
+                  } else {
+                    next.add(ex as ExchangeKey)
+                  }
+                  return next
+                })}
+              />
+              {(boxSpreadsForExpiry.length > 0 || arbsForExpiry.length > 0) && (
+                <ArbPanel
+                  boxSpreads={boxSpreadsForExpiry}
+                  arbs={arbsForExpiry}
+                  expiration={selectedExpiration}
+                  coin={selectedCrypto}
+                  spotPrice={spotPrice}
+                />
+              )}
+            </>
           ) : (
             <OptionsChain
               data={chainData}
