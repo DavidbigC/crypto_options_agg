@@ -58,8 +58,8 @@ function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchan
     const prices = contract.prices
     let bestVal = 0
     let bestEx: ExchangeKey | null = null
-    for (const ex of activeExchanges) {
-      const raw = side === 'sell' ? prices[ex]?.bid : prices[ex]?.ask
+    for (const ex of Array.from(activeExchanges)) {
+      const raw = side === 'sell' ? prices[ex as keyof typeof prices]?.bid : prices[ex as keyof typeof prices]?.ask
       if (!raw || raw === 0) continue
       if (side === 'sell' && raw > bestVal) { bestVal = raw; bestEx = ex }
       if (side === 'buy'  && (bestVal === 0 || raw < bestVal)) { bestVal = raw; bestEx = ex }
