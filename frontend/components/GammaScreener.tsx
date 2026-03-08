@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import classNames from 'classnames'
 import { OptionsData, Exchange } from '@/types/options'
@@ -23,10 +23,18 @@ interface StraddleRow {
   theta: number
   be: number
   bePct: number
+  beToEvent: number | null
 }
 
 export default function GammaScreener({ optionsData, spotPrice, coin, exchange }: GammaScreenerProps) {
   const router = useRouter()
+  const [eventDate, setEventDate] = useState('')
+
+  const daysToEvent = useMemo(() => {
+    if (!eventDate) return null
+    const d = (new Date(eventDate + 'T08:00:00Z').getTime() - Date.now()) / 86_400_000
+    return d > 0 ? d : null
+  }, [eventDate])
 
   const rows = useMemo<StraddleRow[]>(() => {
     if (!optionsData || !spotPrice) return []
@@ -61,6 +69,9 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
       if (!be) continue
 
       const dte = (new Date(expiry + 'T08:00:00Z').getTime() - Date.now()) / 86_400_000
+      const beToEvent = daysToEvent && gamma > 0
+        ? Math.sqrt(2 * daysToEvent * Math.abs(theta) / gamma)
+        : null
 
       results.push({
         expiry,
@@ -71,11 +82,16 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
         theta,
         be,
         bePct: (be / spotPrice) * 100,
+        beToEvent,
       })
     }
 
-    return results.sort((a, b) => a.be - b.be)
-  }, [optionsData, spotPrice])
+    return results.sort((a, b) =>
+      daysToEvent
+        ? (a.beToEvent ?? Infinity) - (b.beToEvent ?? Infinity)
+        : a.be - b.be
+    )
+  }, [optionsData, spotPrice, daysToEvent])
 
   const handleLoad = (row: StraddleRow) => {
     const chain = optionsData!.data[row.expiry]
@@ -108,6 +124,9 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
   }
 
   const worstBe = rows[rows.length - 1]?.be || rows[0].be
+  const worstBeToEvent = daysToEvent
+    ? rows.reduce((m, r) => Math.max(m, r.beToEvent ?? 0), 0) || 1
+    : null
 
   return (
     <div className="card">
@@ -115,10 +134,24 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
         <div>
           <h2 className="text-sm font-semibold text-ink">Gamma Scanner</h2>
           <p className="text-xs text-ink-3 mt-0.5">
-            ATM straddles ranked by cheapest break-even daily move · click to load into builder
+            ATM straddles ranked by {daysToEvent ? 'break-even move to event' : 'cheapest break-even daily move'} · click to load into builder
           </p>
         </div>
-        <span className="text-xs text-ink-3 font-mono">{coin} · {rows.length} expiries</span>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <label className="text-[11px] text-ink-3 whitespace-nowrap">Event date</label>
+            <input
+              type="date"
+              value={eventDate}
+              onChange={e => setEventDate(e.target.value)}
+              className="text-[11px] border border-rim rounded px-1.5 py-0.5 bg-card text-ink focus:outline-none focus:border-violet-400"
+            />
+            {eventDate && (
+              <button onClick={() => setEventDate('')} className="text-[11px] text-ink-3 hover:text-ink">✕</button>
+            )}
+          </div>
+          <span className="text-xs text-ink-3 font-mono">{coin} · {rows.length} expiries</span>
+        </div>
       </div>
 
       <div className="overflow-x-auto">
@@ -133,6 +166,11 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
               <th className="py-1 text-right font-medium">Θ/day</th>
               <th className="py-1 text-right font-medium text-violet-600 dark:text-violet-400">BE/day</th>
               <th className="py-1 text-right font-medium text-violet-600 dark:text-violet-400">BE%</th>
+              {daysToEvent && (
+                <th className="py-1 text-right font-medium text-amber-600 dark:text-amber-400">
+                  BE→{fmtExpiry(eventDate)}
+                </th>
+              )}
               <th className="py-1 w-16" />
             </tr>
           </thead>
@@ -140,11 +178,15 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
             {rows.map((row, i) => {
               const isBest = i === 0
               const relWidth = Math.min(100, (row.be / worstBe) * 100)
+              const relWidthEvent = worstBeToEvent && row.beToEvent
+                ? Math.min(100, (row.beToEvent / worstBeToEvent) * 100)
+                : 0
               return (
                 <tr
                   key={row.expiry}
                   className={classNames('border-b border-rim hover:bg-muted cursor-pointer', {
-                    'bg-violet-50 dark:bg-violet-950/20': isBest,
+                    'bg-violet-50 dark:bg-violet-950/20': isBest && !daysToEvent,
+                    'bg-amber-50 dark:bg-amber-950/20': isBest && !!daysToEvent,
                   })}
                   onClick={() => handleLoad(row)}
                 >
@@ -155,25 +197,37 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
                   <td className="py-1.5 text-right text-ink-3">{row.gamma.toFixed(5)}</td>
                   <td className="py-1.5 text-right text-ink-3">{row.theta.toFixed(1)}</td>
                   <td className={classNames('py-1.5 text-right font-semibold font-mono', {
-                    'text-violet-600 dark:text-violet-400': isBest,
-                    'text-ink': !isBest,
+                    'text-violet-600 dark:text-violet-400': isBest && !daysToEvent,
+                    'text-ink': !isBest || !!daysToEvent,
                   })}>
                     <div className="flex items-center justify-end gap-1.5">
-                      <div className="w-16 h-1 bg-rim rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-violet-400 rounded-full"
-                          style={{ width: `${relWidth}%` }}
-                        />
+                      <div className="w-12 h-1 bg-rim rounded-full overflow-hidden">
+                        <div className="h-full bg-violet-400 rounded-full" style={{ width: `${relWidth}%` }} />
                       </div>
                       ${Math.round(row.be).toLocaleString()}
                     </div>
                   </td>
                   <td className={classNames('py-1.5 text-right font-mono', {
-                    'text-violet-600 dark:text-violet-400': isBest,
-                    'text-ink-2': !isBest,
+                    'text-violet-600 dark:text-violet-400': isBest && !daysToEvent,
+                    'text-ink-2': !isBest || !!daysToEvent,
                   })}>
                     {row.bePct.toFixed(2)}%
                   </td>
+                  {daysToEvent && (
+                    <td className={classNames('py-1.5 text-right font-semibold font-mono', {
+                      'text-amber-600 dark:text-amber-400': isBest,
+                      'text-ink': !isBest,
+                    })}>
+                      {row.beToEvent ? (
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="w-12 h-1 bg-rim rounded-full overflow-hidden">
+                            <div className="h-full bg-amber-400 rounded-full" style={{ width: `${relWidthEvent}%` }} />
+                          </div>
+                          ${Math.round(row.beToEvent).toLocaleString()}
+                        </div>
+                      ) : '--'}
+                    </td>
+                  )}
                   <td className="py-1.5 text-right">
                     <span className="text-[10px] text-ink-3 hover:text-tone">→ Build</span>
                   </td>

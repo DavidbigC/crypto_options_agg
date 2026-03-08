@@ -4,7 +4,7 @@ import { useState } from 'react'
 import classNames from 'classnames'
 import { OptionsChainData, OptionContract, Exchange } from '@/types/options'
 import GreekTh from '@/components/GreekTh'
-import { calcBreakEven } from '@/lib/blackScholes'
+
 
 interface OptionsChainProps {
   data: OptionsChainData
@@ -71,12 +71,6 @@ function OptionRow({ call, put, strike, spotPrice, isATM, exchange, priceUnit, f
     return value.toFixed(decimals)
   }
 
-  const fmtBE = (theta: number | undefined, gamma: number | undefined): string => {
-    if (!theta || !gamma) return '--'
-    const be = calcBreakEven(theta, gamma)
-    return be ? '$' + Math.round(be).toLocaleString() : '--'
-  }
-
   const isITM = (optionType: 'call' | 'put', strike: number, spot: number) =>
     optionType === 'call' ? strike < spot : strike > spot
 
@@ -100,9 +94,6 @@ function OptionRow({ call, put, strike, spotPrice, isATM, exchange, priceUnit, f
       <td className="px-1 py-1 text-right text-ink-3">{call ? fmtGreek(call.delta, 'delta', 2) : '--'}</td>
       <td className="px-1 py-1 text-right text-ink-3">{call ? fmtGreek(call.gamma, 'gamma', 5) : '--'}</td>
       <td className="px-1 py-1 text-right text-ink-3">{call ? fmtGreek(call.theta, 'theta', 1) : '--'}</td>
-      <td className="px-1 py-1 text-right text-violet-600 dark:text-violet-400 text-[11px]">
-        {call ? fmtBE(call.theta, call.gamma) : '--'}
-      </td>
       <td className="px-1 py-1 text-right text-ink-3">{call ? fmtGreek(call.vega, 'vega', 1) : '--'}</td>
       <td className="px-1 py-1 text-right text-xs text-tone font-medium">
         {call && isITM('call', strike, spotPrice) ? 'ITM' : ''}
@@ -122,9 +113,6 @@ function OptionRow({ call, put, strike, spotPrice, isATM, exchange, priceUnit, f
       </td>
       <td className="px-1 py-1 text-left text-ink-3">{put ? fmtGreek(put.vega, 'vega', 1) : '--'}</td>
       <td className="px-1 py-1 text-left text-ink-3">{put ? fmtGreek(put.theta, 'theta', 1) : '--'}</td>
-      <td className="px-1 py-1 text-left text-violet-600 dark:text-violet-400 text-[11px]">
-        {put ? fmtBE(put.theta, put.gamma) : '--'}
-      </td>
       <td className="px-1 py-1 text-left text-ink-3">{put ? fmtGreek(put.gamma, 'gamma', 5) : '--'}</td>
       <td className="px-1 py-1 text-left text-ink-3">{put ? fmtGreek(put.delta, 'delta', 2) : '--'}</td>
       <td className="px-1 py-1 text-left text-ink-3 text-[11px]">{put?.askVol  ? (put.askVol  * 100).toFixed(1) + '%' : '--'}</td>
@@ -216,9 +204,9 @@ export default function OptionsChain({ data, spotPrice, expiration, lastUpdated,
         <table className="w-full text-xs tabular-nums">
           <thead>
             <tr className="border-b border-rim">
-              <th colSpan={13} className="text-center py-1 text-green-700 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 text-xs">CALLS</th>
+              <th colSpan={12} className="text-center py-1 text-green-700 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 text-xs">CALLS</th>
               <th className="w-16" />
-              <th colSpan={13} className="text-center py-1 text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-900/20 text-xs">PUTS</th>
+              <th colSpan={12} className="text-center py-1 text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-900/20 text-xs">PUTS</th>
             </tr>
             <tr className="border-b border-rim text-ink-2 text-xs">
               <th className="px-1 py-1 text-right font-medium">Bid</th>
@@ -231,25 +219,12 @@ export default function OptionsChain({ data, spotPrice, expiration, lastUpdated,
               <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" className="px-1 py-1 text-right" />
               <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" className="px-1 py-1 text-right" />
               <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" className="px-1 py-1 text-right" />
-              <GreekTh
-                symbol="BE"
-                name="Break-even Move"
-                description="Min daily $ move for this option to break even: sqrt(2×|Θ|/Γ)"
-                className="px-1 py-1 text-right text-violet-600 dark:text-violet-400"
-              />
               <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" className="px-1 py-1 text-right" />
               <th className="px-1 py-1 text-right font-medium">ITM</th>
               <th className="px-2 py-1 text-center font-semibold text-ink">Strike</th>
               <th className="px-1 py-1 text-left font-medium">ITM</th>
               <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" align="left" className="px-1 py-1 text-left" />
               <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" align="left" className="px-1 py-1 text-left" />
-              <GreekTh
-                symbol="BE"
-                name="Break-even Move"
-                description="Min daily $ move for this option to break even: sqrt(2×|Θ|/Γ)"
-                align="left"
-                className="px-1 py-1 text-left text-violet-600 dark:text-violet-400"
-              />
               <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" align="left" className="px-1 py-1 text-left" />
               <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" align="left" className="px-1 py-1 text-left" />
               <th className="px-1 py-1 text-left font-medium text-ink-3">aIV</th>
