@@ -7,12 +7,13 @@ import ExpirationTabs from '@/components/ExpirationTabs'
 import OptionsChain from '@/components/OptionsChain'
 import CombinedOptionsChain from '@/components/CombinedOptionsChain'
 import ArbPanel from '@/components/ArbPanel'
-import GammaScreener from '@/components/GammaScreener'
+import GammaScanner from '@/components/scanners/GammaScanner'
+import VegaScanner from '@/components/scanners/VegaScanner'
 import classNames from 'classnames'
 import { OptionsData, Exchange } from '@/types/options'
 type ExchangeKey = 'bybit' | 'okx' | 'deribit'
 const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit']
-import { findBoxSpreads, BoxSpread, findAllArbs, ArbOpportunity, FutureData } from '@/lib/strategies'
+import type { BoxSpread, ArbOpportunity } from '@/lib/strategies'
 import { filterExpirations } from '@/lib/filterExpirations'
 
 const OKX_FAMILY_MAP: Record<string, string> = {
@@ -30,8 +31,9 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [activeExchanges, setActiveExchanges] = useState<Set<ExchangeKey>>(new Set(ALL_EXCHANGES))
-  const [futures, setFutures] = useState<FutureData[]>([])
-  const [showGammaScanner, setShowGammaScanner] = useState(false)
+  const [boxSpreads, setBoxSpreads] = useState<BoxSpread[]>([])
+  const [allArbs, setAllArbs] = useState<ArbOpportunity[]>([])
+  const [activeScanner, setActiveScanner] = useState<'gamma' | 'vega' | null>(null)
   const fetchVersion = useRef(0)
   const selectedExpirationRef = useRef('')
 
@@ -80,23 +82,23 @@ export default function HomePage() {
     return () => evtSource.close()
   }, [selectedCrypto, exchange, selectedExpiration])
 
-  // Futures data for PCP hedge price selection
   useEffect(() => {
-    const load = () => {
-      fetch(`http://localhost:3500/api/futures/${selectedCrypto}`)
+    if (exchange !== 'combined') return
+    let cancelled = false
+    const fetchArbs = () => {
+      fetch(`http://localhost:3500/api/arbs/${selectedCrypto}`)
         .then(r => r.json())
         .then(d => {
-          const all: FutureData[] = (d.futures ?? []).filter(
-            (f: FutureData) => f.symbol.toUpperCase().includes(selectedCrypto.toUpperCase())
-          )
-          setFutures(all)
+          if (cancelled || !d || d.error) return
+          setBoxSpreads(d.boxSpreads ?? [])
+          setAllArbs(d.allArbs ?? [])
         })
         .catch(() => {})
     }
-    load()
-    const id = setInterval(load, 15_000)
-    return () => clearInterval(id)
-  }, [selectedCrypto])
+    fetchArbs()
+    const id = setInterval(fetchArbs, 2000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [exchange, selectedCrypto])
 
   const handleCryptoChange = (crypto: 'BTC' | 'ETH' | 'SOL') => {
     fetchVersion.current++
@@ -111,6 +113,10 @@ export default function HomePage() {
     setExchange(ex)
     setSelectedExpiration('')
     setOptionsData(null)
+    if (ex !== 'combined') {
+      setBoxSpreads([])
+      setAllArbs([])
+    }
   }
 
   const expiryExchangeCounts = useMemo(() => {
@@ -128,16 +134,6 @@ export default function HomePage() {
     }
     return result
   }, [exchange, optionsData])
-
-  const boxSpreads = useMemo<BoxSpread[]>(() => {
-    if (exchange !== 'combined' || !optionsData || !spotPrice) return []
-    return findBoxSpreads(optionsData, spotPrice, activeExchanges)
-  }, [exchange, optionsData, spotPrice, activeExchanges])
-
-  const allArbs = useMemo<ArbOpportunity[]>(() => {
-    if (exchange !== 'combined' || !optionsData || !spotPrice) return []
-    return findAllArbs(optionsData, spotPrice, activeExchanges, futures)
-  }, [exchange, optionsData, spotPrice, activeExchanges, futures])
 
   const arbExpiryStrategies = useMemo(() => {
     const map = new Map<string, Set<string>>()
@@ -190,21 +186,43 @@ export default function HomePage() {
               />
             </div>
           )}
-          <button
-            onClick={() => setShowGammaScanner(v => !v)}
-            className={classNames(
-              'flex-shrink-0 self-start px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
-              showGammaScanner
-                ? 'bg-violet-600 text-white border-violet-600'
-                : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
-            )}
-          >
-            Γ Scanner
-          </button>
+          <div className="flex-shrink-0 self-start flex gap-1">
+            <button
+              onClick={() => setActiveScanner(v => v === 'gamma' ? null : 'gamma')}
+              className={classNames(
+                'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
+                activeScanner === 'gamma'
+                  ? 'bg-violet-600 text-white border-violet-600'
+                  : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
+              )}
+            >
+              Γ Scanner
+            </button>
+            <button
+              onClick={() => setActiveScanner(v => v === 'vega' ? null : 'vega')}
+              className={classNames(
+                'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
+                activeScanner === 'vega'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
+              )}
+            >
+              V Scanner
+            </button>
+          </div>
         </div>
 
-        {showGammaScanner && (
-          <GammaScreener
+        {activeScanner === 'gamma' && (
+          <GammaScanner
+            optionsData={optionsData}
+            spotPrice={spotPrice}
+            coin={selectedCrypto}
+            exchange={exchange}
+            activeExchanges={activeExchanges}
+          />
+        )}
+        {activeScanner === 'vega' && (
+          <VegaScanner
             optionsData={optionsData}
             spotPrice={spotPrice}
             coin={selectedCrypto}
