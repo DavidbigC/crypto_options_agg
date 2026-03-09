@@ -96,13 +96,18 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange, 
         }
       }
 
-      // Best strangle: iterate all OTM call × OTM put pairs
+      // Best delta-neutral strangle: iterate OTM call × OTM put pairs
+      // Require |call.delta + put.delta| < 0.15 for symmetric up/down P&L.
+      // Fall back to unfiltered if no delta data is available.
+      const DELTA_TOL = 0.15
       const otmCalls = chain.calls.filter(c => c.strike > spotPrice && (c.gamma || 0) > 0 && c.theta)
       const otmPuts  = chain.puts.filter(p => p.strike < spotPrice && (p.gamma || 0) > 0 && p.theta)
+      const hasDelta = otmCalls.some(c => c.delta !== undefined && c.delta !== 0)
 
       let bestStrangle: StrategyRow | null = null
       for (const call of otmCalls) {
         for (const put of otmPuts) {
+          if (hasDelta && Math.abs((call.delta || 0) + (put.delta || 0)) > DELTA_TOL) continue
           const gamma = (call.gamma || 0) + (put.gamma || 0)
           const theta = (call.theta || 0) + (put.theta || 0)
           const be    = calcBreakEven(theta, gamma)
