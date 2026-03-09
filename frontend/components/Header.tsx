@@ -25,7 +25,7 @@ export default function Header({ exchange, onExchangeChange }: HeaderProps) {
     <header className="bg-card border-b border-rim">
       <div className="container mx-auto px-4 py-3">
         <div className="flex items-center gap-4">
-          <a href="/" className="text-sm font-semibold text-ink tracking-tight shrink-0 hover:text-tone transition-colors">Options</a>
+          <a href="/" target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-ink tracking-tight shrink-0 hover:text-tone transition-colors">Options</a>
 
           {/* Exchange selector */}
           <div className="flex items-center bg-muted rounded-md p-0.5 gap-0.5">
@@ -47,7 +47,7 @@ export default function Header({ exchange, onExchangeChange }: HeaderProps) {
 
           <div className="flex-1" />
 
-          <a href="/builder" className="text-xs text-ink-2 hover:text-ink transition-colors">
+          <a href="/builder" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
             Strategy Builder
           </a>
 

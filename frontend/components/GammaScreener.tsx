@@ -1,7 +1,6 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
 import classNames from 'classnames'
 import { OptionsData, Exchange } from '@/types/options'
 import { calcBreakEven } from '@/lib/blackScholes'
@@ -42,7 +41,6 @@ function getBestAsk(contract: any, activeExchanges?: Set<string>): number {
 }
 
 export default function GammaScreener({ optionsData, spotPrice, coin, exchange, activeExchanges }: GammaScreenerProps) {
-  const router = useRouter()
   const [eventDate, setEventDate] = useState('')
 
   const daysToEvent = useMemo(() => {
@@ -155,7 +153,7 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange, 
         { type: 'put',  action: 'buy', strike: row.putStrike,  expiry: row.expiry, price: putAsk,  exchange: putEx,  qty: 1 },
       ],
     }))
-    router.push('/builder')
+    window.open('/builder', '_blank', 'noopener,noreferrer')
   }
 
   const fmtExpiry = (exp: string) =>
