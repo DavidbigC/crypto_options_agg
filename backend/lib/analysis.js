@@ -39,7 +39,8 @@ export function computeAnalysis(response, spotPrice) {
       wObs.push(mv * mv * T)
     }
 
-    sviFits[exp] = fitSVI(ks, wObs)
+    const fit = fitSVI(ks, wObs)
+    sviFits[exp] = fit ? { ...fit, T } : null
   }
 
   // Compute term structure
