@@ -66,8 +66,9 @@ export default function HomePage() {
         setLastUpdated(new Date())
         setLoading(false)
         if (data.expirations?.length > 0 && !selectedExpirationRef.current) {
-          setSelectedExpiration(data.expirations[0])
-          selectedExpirationRef.current = data.expirations[0]
+          const first = filterExpirations(data.expirations)[0] ?? data.expirations[0]
+          setSelectedExpiration(first)
+          selectedExpirationRef.current = first
         }
       } catch {}
     }
