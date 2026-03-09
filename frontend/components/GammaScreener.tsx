@@ -14,10 +14,12 @@ interface GammaScreenerProps {
   exchange: Exchange
 }
 
-interface StraddleRow {
+interface StrategyRow {
   expiry: string
   dte: number
-  strike: number
+  type: 'straddle' | 'strangle'
+  callStrike: number
+  putStrike: number
   cost: number
   gamma: number
   theta: number
@@ -36,15 +38,24 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
     return d > 0 ? d : null
   }, [eventDate])
 
-  const rows = useMemo<StraddleRow[]>(() => {
+  const rows = useMemo<StrategyRow[]>(() => {
     if (!optionsData || !spotPrice) return []
     const expirations = filterExpirations(optionsData.expirations)
-    const results: StraddleRow[] = []
+    const results: StrategyRow[] = []
+    const priceMultiplier = exchange === 'okx' && spotPrice > 0 ? spotPrice : 1
+
+    const makeBeToEvent = (theta: number, gamma: number) =>
+      daysToEvent && gamma > 0
+        ? Math.sqrt(2 * daysToEvent * Math.abs(theta) / gamma)
+        : null
 
     for (const expiry of expirations) {
       const chain = optionsData.data[expiry]
       if (!chain?.calls?.length || !chain?.puts?.length) continue
 
+      const dte = Math.max(0, (new Date(expiry + 'T08:00:00Z').getTime() - Date.now()) / 86_400_000)
+
+      // ATM straddle
       const allStrikes = Array.from(new Set([
         ...chain.calls.map(c => c.strike),
         ...chain.puts.map(p => p.strike),
@@ -52,38 +63,54 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
       const atm = allStrikes.reduce((prev, curr) =>
         Math.abs(curr - spotPrice) < Math.abs(prev - spotPrice) ? curr : prev
       )
+      const atmCall = chain.calls.find(c => c.strike === atm)
+      const atmPut  = chain.puts.find(p => p.strike === atm)
+      if (atmCall && atmPut) {
+        const callAsk = (atmCall as any).bestAsk ?? atmCall.ask
+        const putAsk  = (atmPut  as any).bestAsk ?? atmPut.ask
+        if (callAsk && putAsk) {
+          const gamma = (atmCall.gamma || 0) + (atmPut.gamma || 0)
+          const theta = (atmCall.theta || 0) + (atmPut.theta || 0)
+          const be    = calcBreakEven(theta, gamma)
+          if (be) {
+            results.push({
+              expiry, dte, type: 'straddle',
+              callStrike: atm, putStrike: atm,
+              cost: (callAsk + putAsk) * priceMultiplier,
+              gamma, theta, be,
+              bePct: (be / spotPrice) * 100,
+              beToEvent: makeBeToEvent(theta, gamma),
+            })
+          }
+        }
+      }
 
-      const call = chain.calls.find(c => c.strike === atm)
-      const put  = chain.puts.find(p => p.strike === atm)
-      if (!call || !put) continue
+      // Best strangle: iterate all OTM call × OTM put pairs
+      const otmCalls = chain.calls.filter(c => c.strike > spotPrice && (c.gamma || 0) > 0 && c.theta)
+      const otmPuts  = chain.puts.filter(p => p.strike < spotPrice && (p.gamma || 0) > 0 && p.theta)
 
-      const callAsk = (call as any).bestAsk ?? call.ask
-      const putAsk  = (put  as any).bestAsk ?? put.ask
-      if (!callAsk || !putAsk) continue
-
-      const priceMultiplier = exchange === 'okx' && spotPrice > 0 ? spotPrice : 1
-      const cost  = (callAsk + putAsk) * priceMultiplier
-      const gamma = (call.gamma || 0) + (put.gamma || 0)
-      const theta = (call.theta || 0) + (put.theta || 0)
-      const be    = calcBreakEven(theta, gamma)
-      if (!be) continue
-
-      const dte = (new Date(expiry + 'T08:00:00Z').getTime() - Date.now()) / 86_400_000
-      const beToEvent = daysToEvent && gamma > 0
-        ? Math.sqrt(2 * daysToEvent * Math.abs(theta) / gamma)
-        : null
-
-      results.push({
-        expiry,
-        dte: Math.max(0, dte),
-        strike: atm,
-        cost,
-        gamma,
-        theta,
-        be,
-        bePct: (be / spotPrice) * 100,
-        beToEvent,
-      })
+      let bestStrangle: StrategyRow | null = null
+      for (const call of otmCalls) {
+        for (const put of otmPuts) {
+          const gamma = (call.gamma || 0) + (put.gamma || 0)
+          const theta = (call.theta || 0) + (put.theta || 0)
+          const be    = calcBreakEven(theta, gamma)
+          if (!be) continue
+          if (bestStrangle && be >= bestStrangle.be) continue
+          const callAsk = (call as any).bestAsk ?? call.ask
+          const putAsk  = (put  as any).bestAsk ?? put.ask
+          if (!callAsk || !putAsk) continue
+          bestStrangle = {
+            expiry, dte, type: 'strangle',
+            callStrike: call.strike, putStrike: put.strike,
+            cost: (callAsk + putAsk) * priceMultiplier,
+            gamma, theta, be,
+            bePct: (be / spotPrice) * 100,
+            beToEvent: makeBeToEvent(theta, gamma),
+          }
+        }
+      }
+      if (bestStrangle) results.push(bestStrangle)
     }
 
     return results.sort((a, b) =>
@@ -91,12 +118,12 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
         ? (a.beToEvent ?? Infinity) - (b.beToEvent ?? Infinity)
         : a.be - b.be
     )
-  }, [optionsData, spotPrice, daysToEvent])
+  }, [optionsData, spotPrice, exchange, daysToEvent])
 
-  const handleLoad = (row: StraddleRow) => {
+  const handleLoad = (row: StrategyRow) => {
     const chain = optionsData!.data[row.expiry]
-    const call  = chain.calls.find(c => c.strike === row.strike)!
-    const put   = chain.puts.find(p => p.strike === row.strike)!
+    const call  = chain.calls.find(c => c.strike === row.callStrike)!
+    const put   = chain.puts.find(p => p.strike === row.putStrike)!
     const callEx  = (call as any).bestAskEx ?? exchange
     const putEx   = (put  as any).bestAskEx ?? exchange
     const callAsk = (call as any).bestAsk ?? call.ask
@@ -105,8 +132,8 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
     localStorage.setItem('arb_pending_strategy', JSON.stringify({
       coin,
       legs: [
-        { type: 'call', action: 'buy', strike: row.strike, expiry: row.expiry, price: callAsk, exchange: callEx, qty: 1 },
-        { type: 'put',  action: 'buy', strike: row.strike, expiry: row.expiry, price: putAsk,  exchange: putEx,  qty: 1 },
+        { type: 'call', action: 'buy', strike: row.callStrike, expiry: row.expiry, price: callAsk, exchange: callEx, qty: 1 },
+        { type: 'put',  action: 'buy', strike: row.putStrike,  expiry: row.expiry, price: putAsk,  exchange: putEx,  qty: 1 },
       ],
     }))
     router.push('/builder')
@@ -115,15 +142,20 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
   const fmtExpiry = (exp: string) =>
     new Date(exp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
+  const fmtStrike = (row: StrategyRow) =>
+    row.type === 'straddle'
+      ? row.callStrike.toLocaleString()
+      : `${(row.callStrike / 1000).toFixed(0)}k / ${(row.putStrike / 1000).toFixed(0)}k`
+
   if (!rows.length) {
     return (
       <div className="card py-6 text-center text-sm text-ink-3">
-        No straddle data available — Greeks required (use Deribit, OKX, or Combined).
+        No data available — Greeks required (use Deribit, OKX, or Combined).
       </div>
     )
   }
 
-  const worstBe = rows[rows.length - 1]?.be || rows[0].be
+  const worstBe = rows.reduce((m, r) => Math.max(m, r.be), 0) || 1
   const worstBeToEvent = daysToEvent
     ? rows.reduce((m, r) => Math.max(m, r.beToEvent ?? 0), 0) || 1
     : null
@@ -134,7 +166,7 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
         <div>
           <h2 className="text-sm font-semibold text-ink">Gamma Scanner</h2>
           <p className="text-xs text-ink-3 mt-0.5">
-            ATM straddles ranked by {daysToEvent ? 'break-even move to event' : 'cheapest break-even daily move'} · click to load into builder
+            Best straddle &amp; strangle per expiry ranked by {daysToEvent ? 'break-even move to event' : 'BE/day'} · click to load into builder
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -150,7 +182,7 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
               <button onClick={() => setEventDate('')} className="text-[11px] text-ink-3 hover:text-ink">✕</button>
             )}
           </div>
-          <span className="text-xs text-ink-3 font-mono">{coin} · {rows.length} expiries</span>
+          <span className="text-xs text-ink-3 font-mono">{coin} · {rows.length} rows</span>
         </div>
       </div>
 
@@ -158,9 +190,10 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
         <table className="w-full text-xs tabular-nums">
           <thead>
             <tr className="border-b border-rim text-ink-2 text-[11px]">
+              <th className="py-1 text-left font-medium">Type</th>
               <th className="py-1 text-left font-medium">Expiry</th>
               <th className="py-1 text-right font-medium">DTE</th>
-              <th className="py-1 text-right font-medium">Strike</th>
+              <th className="py-1 text-right font-medium">Strike(s)</th>
               <th className="py-1 text-right font-medium">Cost</th>
               <th className="py-1 text-right font-medium">Γ</th>
               <th className="py-1 text-right font-medium">Θ/day</th>
@@ -177,22 +210,31 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
           <tbody>
             {rows.map((row, i) => {
               const isBest = i === 0
+              const isStrangle = row.type === 'strangle'
               const relWidth = Math.min(100, (row.be / worstBe) * 100)
               const relWidthEvent = worstBeToEvent && row.beToEvent
                 ? Math.min(100, (row.beToEvent / worstBeToEvent) * 100)
                 : 0
               return (
                 <tr
-                  key={row.expiry}
+                  key={`${row.expiry}-${row.type}`}
                   className={classNames('border-b border-rim hover:bg-muted cursor-pointer', {
                     'bg-violet-50 dark:bg-violet-950/20': isBest && !daysToEvent,
                     'bg-amber-50 dark:bg-amber-950/20': isBest && !!daysToEvent,
                   })}
                   onClick={() => handleLoad(row)}
                 >
+                  <td className="py-1.5">
+                    <span className={classNames('text-[10px] font-semibold px-1.5 py-0.5 rounded', {
+                      'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300': !isStrangle,
+                      'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300': isStrangle,
+                    })}>
+                      {isStrangle ? 'Strangle' : 'Straddle'}
+                    </span>
+                  </td>
                   <td className="py-1.5 font-mono text-ink">{fmtExpiry(row.expiry)}</td>
                   <td className="py-1.5 text-right text-ink-2">{row.dte.toFixed(1)}d</td>
-                  <td className="py-1.5 text-right font-mono text-ink">{row.strike.toLocaleString()}</td>
+                  <td className="py-1.5 text-right font-mono text-ink">{fmtStrike(row)}</td>
                   <td className="py-1.5 text-right text-ink-2">${Math.round(row.cost).toLocaleString()}</td>
                   <td className="py-1.5 text-right text-ink-3">{row.gamma.toFixed(5)}</td>
                   <td className="py-1.5 text-right text-ink-3">{row.theta.toFixed(1)}</td>
