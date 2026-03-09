@@ -12,6 +12,7 @@ interface GammaScreenerProps {
   spotPrice: number
   coin: 'BTC' | 'ETH' | 'SOL'
   exchange: Exchange
+  activeExchanges?: Set<string>
 }
 
 interface StrategyRow {
@@ -28,7 +29,19 @@ interface StrategyRow {
   beToEvent: number | null
 }
 
-export default function GammaScreener({ optionsData, spotPrice, coin, exchange }: GammaScreenerProps) {
+function getBestAsk(contract: any, activeExchanges?: Set<string>): number {
+  if (activeExchanges && contract.prices) {
+    let best = 0
+    for (const ex of Array.from(activeExchanges)) {
+      const ask = contract.prices[ex]?.ask
+      if (ask && ask > 0 && (best === 0 || ask < best)) best = ask
+    }
+    if (best > 0) return best
+  }
+  return (contract.bestAsk ?? contract.ask) || 0
+}
+
+export default function GammaScreener({ optionsData, spotPrice, coin, exchange, activeExchanges }: GammaScreenerProps) {
   const router = useRouter()
   const [eventDate, setEventDate] = useState('')
 
@@ -66,8 +79,8 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
       const atmCall = chain.calls.find(c => c.strike === atm)
       const atmPut  = chain.puts.find(p => p.strike === atm)
       if (atmCall && atmPut) {
-        const callAsk = (atmCall as any).bestAsk ?? atmCall.ask
-        const putAsk  = (atmPut  as any).bestAsk ?? atmPut.ask
+        const callAsk = getBestAsk(atmCall, activeExchanges)
+        const putAsk  = getBestAsk(atmPut, activeExchanges)
         if (callAsk && putAsk) {
           const gamma = (atmCall.gamma || 0) + (atmPut.gamma || 0)
           const theta = (atmCall.theta || 0) + (atmPut.theta || 0)
@@ -97,8 +110,8 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
           const be    = calcBreakEven(theta, gamma)
           if (!be) continue
           if (bestStrangle && be >= bestStrangle.be) continue
-          const callAsk = (call as any).bestAsk ?? call.ask
-          const putAsk  = (put  as any).bestAsk ?? put.ask
+          const callAsk = getBestAsk(call, activeExchanges)
+          const putAsk  = getBestAsk(put, activeExchanges)
           if (!callAsk || !putAsk) continue
           bestStrangle = {
             expiry, dte, type: 'strangle',
@@ -118,16 +131,22 @@ export default function GammaScreener({ optionsData, spotPrice, coin, exchange }
         ? (a.beToEvent ?? Infinity) - (b.beToEvent ?? Infinity)
         : a.be - b.be
     )
-  }, [optionsData, spotPrice, exchange, daysToEvent])
+  }, [optionsData, spotPrice, exchange, daysToEvent, activeExchanges])
 
   const handleLoad = (row: StrategyRow) => {
     const chain = optionsData!.data[row.expiry]
     const call  = chain.calls.find(c => c.strike === row.callStrike)!
     const put   = chain.puts.find(p => p.strike === row.putStrike)!
-    const callEx  = (call as any).bestAskEx ?? exchange
-    const putEx   = (put  as any).bestAskEx ?? exchange
-    const callAsk = (call as any).bestAsk ?? call.ask
-    const putAsk  = (put  as any).bestAsk ?? put.ask
+    const callAsk = getBestAsk(call, activeExchanges)
+    const putAsk  = getBestAsk(put, activeExchanges)
+    const callPrices = (call as any).prices
+    const putPrices  = (put  as any).prices
+    const callEx  = (activeExchanges && callPrices)
+      ? (Array.from(activeExchanges).find(ex => callPrices[ex]?.ask === callAsk) ?? exchange)
+      : ((call as any).bestAskEx ?? exchange)
+    const putEx   = (activeExchanges && putPrices)
+      ? (Array.from(activeExchanges).find(ex => putPrices[ex]?.ask === putAsk) ?? exchange)
+      : ((put as any).bestAskEx ?? exchange)
 
     localStorage.setItem('arb_pending_strategy', JSON.stringify({
       coin,

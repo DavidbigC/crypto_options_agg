@@ -208,6 +208,7 @@ export default function HomePage() {
             spotPrice={spotPrice}
             coin={selectedCrypto}
             exchange={exchange}
+            activeExchanges={activeExchanges}
           />
         )}
 
