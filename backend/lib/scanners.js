@@ -21,7 +21,7 @@ function getBid(contract) {
  * Filter expirations to future dates only (same logic as frontend filterExpirations).
  * Expiry strings are YYYY-MM-DD; cutoff is T08:00:00Z on that day.
  */
-function futurExpirations(expirations) {
+function futureExpirations(expirations) {
   const now = Date.now()
   return expirations.filter(exp => new Date(exp + 'T08:00:00Z').getTime() > now)
 }
@@ -43,7 +43,7 @@ function futurExpirations(expirations) {
  */
 export function computeGammaRows(optionsData, spotPrice) {
   if (!optionsData || !spotPrice) return []
-  const expirations = futurExpirations(optionsData.expirations || [])
+  const expirations = futureExpirations(optionsData.expirations || [])
   const results = []
 
   for (const expiry of expirations) {
@@ -57,6 +57,7 @@ export function computeGammaRows(optionsData, spotPrice) {
       ...chain.calls.map(c => c.strike),
       ...chain.puts.map(p => p.strike),
     ]))
+    if (!allStrikes.length) continue
     const atm = allStrikes.reduce((prev, curr) =>
       Math.abs(curr - spotPrice) < Math.abs(prev - spotPrice) ? curr : prev
     )
@@ -148,7 +149,7 @@ export function computeGammaRows(optionsData, spotPrice) {
  */
 export function computeVegaRows(optionsData, spotPrice) {
   if (!optionsData || !spotPrice) return []
-  const expirations = futurExpirations(optionsData.expirations || [])
+  const expirations = futureExpirations(optionsData.expirations || [])
   const results = []
 
   for (const expiry of expirations) {
@@ -162,6 +163,7 @@ export function computeVegaRows(optionsData, spotPrice) {
       ...chain.calls.map(c => c.strike),
       ...chain.puts.map(p => p.strike),
     ]))
+    if (!allStrikes.length) continue
     const atm = allStrikes.reduce((prev, curr) =>
       Math.abs(curr - spotPrice) < Math.abs(prev - spotPrice) ? curr : prev
     )
