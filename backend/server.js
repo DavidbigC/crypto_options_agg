@@ -22,6 +22,7 @@ import { addDeriveViewer, removeDeriveViewer, deriveTickersCache, deriveSpotCach
 import { futuresCache, startFuturesPolling } from './lib/futures.js';
 import { analysisCache, updateAnalysisCache } from './lib/analysis.js'
 import { arbCache, updateArbCache } from './lib/arbs.js'
+import { scannerCache, updateScannerCache } from './lib/scanners.js'
 
 dotenv.config();
 
@@ -700,6 +701,7 @@ async function pollBybit(coin) {
       emitSSE('bybit',    coin, data)
       emitSSE('combined', coin, combined)
       updateAnalysisCache(`bybit:${coin}`, data, bybitSpotCache[coin] ?? 0)
+      updateScannerCache(`bybit:${coin}`, data, bybitSpotCache[coin] ?? 0)
       if (combined) updateArbCache(coin, combined, bybitSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
     }
   } catch (err) {
@@ -742,6 +744,7 @@ async function pollOkxTickers(instFamily) {
     emitSSE('okx',      instFamily, okxResp)
     emitSSE('combined', coin,       combined)
     updateAnalysisCache(`okx:${instFamily}`, okxResp, okxSpotCache[`${coin}-USDT`] ?? 0)
+    updateScannerCache(`okx:${instFamily}`, okxResp, okxSpotCache[`${coin}-USDT`] ?? 0)
     if (combined) updateArbCache(coin, combined, okxSpotCache[`${coin}-USDT`] ?? 0, futuresCache[coin] ?? [])
   } catch (err) {
     console.error(`OKX ticker poll error (${instFamily}):`, err.message);
@@ -922,6 +925,17 @@ app.get('/api/arbs/:coin', (req, res) => {
   res.json(cached)
 })
 
+// ─── Scanners Route ───────────────────────────────────────────────────────────
+
+app.get('/api/scanners/:exchange/:coin', (req, res) => {
+  const { exchange } = req.params
+  const coin = req.params.coin.toUpperCase()
+  const key = `${exchange}:${coin}`
+  const cached = scannerCache[key]
+  if (!cached) return res.status(503).json({ error: 'Scanner cache warming up' })
+  res.json(cached)
+})
+
 // Debug: inspect raw Derive cache to see actual field names
 app.get('/api/futures/:coin', (req, res) => {
   const coin = req.params.coin.toUpperCase()
@@ -961,6 +975,8 @@ setInterval(() => {
       emitSSE('deribit', coin, data)
       updateAnalysisCache(`deribit:${coin}`, data, bybitSpotCache[coin] ?? 0)
       updateAnalysisCache(`combined:${coin}`, combinedResp, bybitSpotCache[coin] ?? 0)
+      updateScannerCache(`deribit:${coin}`, data, bybitSpotCache[coin] ?? 0)
+      updateScannerCache(`combined:${coin}`, combinedResp, bybitSpotCache[coin] ?? 0)
       if (combinedResp) updateArbCache(coin, combinedResp, bybitSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
     }
   }
