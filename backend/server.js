@@ -696,10 +696,10 @@ async function pollBybit(coin) {
     if (spot > 0) bybitSpotCache[coin] = spot
     const data = buildBybitResponse(coin)
     if (data) {
-      emitSSE('bybit',    coin, data)
-      emitSSE('combined', coin, buildCombinedResponse(coin))
-      updateAnalysisCache(`bybit:${coin}`, data, bybitSpotCache[coin] ?? 0)
       const combined = buildCombinedResponse(coin)
+      emitSSE('bybit',    coin, data)
+      emitSSE('combined', coin, combined)
+      updateAnalysisCache(`bybit:${coin}`, data, bybitSpotCache[coin] ?? 0)
       if (combined) updateArbCache(coin, combined, bybitSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
     }
   } catch (err) {
@@ -738,10 +738,10 @@ async function pollOkxTickers(instFamily) {
     }
     const coin = instFamily.split('-')[0]
     const okxResp = buildOkxResponse(instFamily)
-    emitSSE('okx',      instFamily, okxResp)
-    emitSSE('combined', coin,       buildCombinedResponse(coin))
-    updateAnalysisCache(`okx:${instFamily}`, okxResp, okxSpotCache[`${coin}-USDT`] ?? 0)
     const combined = buildCombinedResponse(coin)
+    emitSSE('okx',      instFamily, okxResp)
+    emitSSE('combined', coin,       combined)
+    updateAnalysisCache(`okx:${instFamily}`, okxResp, okxSpotCache[`${coin}-USDT`] ?? 0)
     if (combined) updateArbCache(coin, combined, okxSpotCache[`${coin}-USDT`] ?? 0, futuresCache[coin] ?? [])
   } catch (err) {
     console.error(`OKX ticker poll error (${instFamily}):`, err.message);
@@ -957,10 +957,10 @@ setInterval(() => {
   for (const coin of ['BTC', 'ETH', 'SOL']) {
     const data = buildDeribitResponse(coin)
     if (data) {
+      const combinedResp = buildCombinedResponse(coin)
       emitSSE('deribit', coin, data)
       updateAnalysisCache(`deribit:${coin}`, data, bybitSpotCache[coin] ?? 0)
-      updateAnalysisCache(`combined:${coin}`, buildCombinedResponse(coin), bybitSpotCache[coin] ?? 0)
-      const combinedResp = buildCombinedResponse(coin)
+      updateAnalysisCache(`combined:${coin}`, combinedResp, bybitSpotCache[coin] ?? 0)
       if (combinedResp) updateArbCache(coin, combinedResp, bybitSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
     }
   }
