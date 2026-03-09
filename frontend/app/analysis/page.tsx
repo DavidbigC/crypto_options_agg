@@ -56,7 +56,7 @@ export default function AnalysisPage() {
           if (data.expirations?.length) merged.expirations = data.expirations
           return merged
         })
-        setSpotPrice(data.spotPrice ?? 0)
+        if (data.spotPrice > 0) setSpotPrice(data.spotPrice)
         setLoading(false)
         if (data.expirations?.length > 0 && !selectedExpirationRef.current) {
           const first = filterExpirations(data.expirations)[0] ?? data.expirations[0]
@@ -72,15 +72,18 @@ export default function AnalysisPage() {
 
   useEffect(() => {
     const coinParam = exchange === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
+    let cancelled = false
     const fetchAnalysis = () => {
       fetch(`http://localhost:3500/api/analysis/${exchange}/${coinParam}`)
         .then(r => r.json())
-        .then(d => { if (d && !d.error) setAnalysisData(d) })
+        .then(d => {
+          if (!cancelled && d && !d.error) setAnalysisData(d)
+        })
         .catch(() => {})
     }
     fetchAnalysis()
     const id = setInterval(fetchAnalysis, 5000)
-    return () => clearInterval(id)
+    return () => { cancelled = true; clearInterval(id) }
   }, [exchange, selectedCrypto])
 
   const handleExchangeChange = (ex: Exchange) => {
