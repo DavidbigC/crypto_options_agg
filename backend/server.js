@@ -18,7 +18,9 @@ import { okxCache, startOkxWebSocket } from './lib/okx-ws.js'
 import { startDeribitPolling, buildDeribitResponse } from './lib/deribit.js';
 import { startDeribitWS, setDeribitUpdateCallback } from './lib/deribit-ws.js';
 import { buildDeriveResponse } from './lib/derive.js';
-import { addDeriveViewer, removeDeriveViewer, deriveTickersCache, deriveSpotCache, setDeriveUpdateCallback } from './lib/derive-ws.js';
+import { addDeriveViewer, removeDeriveViewer, deriveTickersCache, deriveSpotCache, setDeriveUpdateCallback } from './lib/derive-ws.js'
+import { futuresCache, startFuturesPolling } from './lib/futures.js';
+import { analysisCache, updateAnalysisCache } from './lib/analysis.js'
 
 dotenv.config();
 
@@ -60,6 +62,9 @@ function buildBybitResponse(baseCoin) {
       theta:             parseFloat(ticker.theta || 0),
       vega:              parseFloat(ticker.vega || 0),
       impliedVolatility: parseFloat(ticker.impliedVolatility || 0),
+      markVol:           parseFloat(ticker.impliedVolatility || 0),
+      bidVol:            parseFloat(ticker.bid1Iv || 0),
+      askVol:            parseFloat(ticker.ask1Iv || 0),
       openInterest:      parseFloat(ticker.openInterest || 0),
       markPrice:         parseFloat(ticker.markPrice || 0),
     }
@@ -111,7 +116,10 @@ function buildOkxResponse(instFamily) {
       askVol:            parseFloat(item.askVol || 0),
     }
     const expiry = parsed.expiryDate
-    if (!optionsByDate[expiry]) optionsByDate[expiry] = { calls: [], puts: [] }
+    if (!optionsByDate[expiry]) {
+      const fwdPrice = parseFloat(item.fwdPx || 0)
+      optionsByDate[expiry] = { calls: [], puts: [], forwardPrice: fwdPrice }
+    }
     if (parsed.optionType === 'call') optionsByDate[expiry].calls.push(contract)
     else optionsByDate[expiry].puts.push(contract)
   }
@@ -132,8 +140,14 @@ function buildCombinedResponse(baseCoin) {
   const okxSpot           = okxSpotCache[`${baseCoin}-USDT`] ?? 0
   const spotPrice         = bybitSpot || okxSpot
   const merged = {}
+  const forwardPrices = {}   // expiry → forward price in USD
   const ensure = (key) => {
-    if (!merged[key]) merged[key] = { bestBid: 0, bestBidEx: null, bestAsk: 0, bestAskEx: null, delta: 0, gamma: 0, theta: 0, vega: 0 }
+    if (!merged[key]) merged[key] = {
+      bestBid: 0, bestBidEx: null, bestAsk: 0, bestAskEx: null,
+      prices: { bybit: { bid: 0, ask: 0 }, okx: { bid: 0, ask: 0 }, deribit: { bid: 0, ask: 0 } },
+      delta: 0, gamma: 0, theta: 0, vega: 0,
+      markVol: 0, bidVol: 0, askVol: 0,
+    }
     return merged[key]
   }
   for (const ticker of bybitTickers) {
@@ -143,12 +157,21 @@ function buildCombinedResponse(baseCoin) {
     const entry = ensure(key)
     const bid   = parseFloat(ticker.bid1Price || 0)
     const ask   = parseFloat(ticker.ask1Price || 0)
+    entry.prices.bybit = { bid, ask }
     if (bid > entry.bestBid) { entry.bestBid = bid; entry.bestBidEx = 'bybit' }
     if (ask > 0 && (entry.bestAsk === 0 || ask < entry.bestAsk)) { entry.bestAsk = ask; entry.bestAskEx = 'bybit' }
-    entry.delta = parseFloat(ticker.delta || 0)
-    entry.gamma = parseFloat(ticker.gamma || 0)
-    entry.theta = parseFloat(ticker.theta || 0)
-    entry.vega  = parseFloat(ticker.vega || 0)
+    const bybitFwd = parseFloat(ticker.underlyingPrice || 0)
+    if (bybitFwd > 0 && !forwardPrices[parsed.expiryDate]) forwardPrices[parsed.expiryDate] = bybitFwd
+    entry.delta   = parseFloat(ticker.delta || 0)
+    entry.gamma   = parseFloat(ticker.gamma || 0)
+    entry.theta   = parseFloat(ticker.theta || 0)
+    entry.vega    = parseFloat(ticker.vega  || 0)
+    const bMarkVol = parseFloat(ticker.impliedVolatility || 0)
+    const bBidVol  = parseFloat(ticker.bid1Iv || 0)
+    const bAskVol  = parseFloat(ticker.ask1Iv || 0)
+    if (bMarkVol > 0) entry.markVol = bMarkVol
+    if (bBidVol  > 0) entry.bidVol  = bBidVol
+    if (bAskVol  > 0) entry.askVol  = bAskVol
   }
   for (const [instId, item] of Object.entries(okxFamilyCache)) {
     const parsed = parseOkxInstId(instId)
@@ -158,22 +181,37 @@ function buildCombinedResponse(baseCoin) {
     const ticker = okxFamilyTickers[instId] ?? {}
     const bid    = parseFloat(ticker.bidPx || 0) * (okxSpot || 1)
     const ask    = parseFloat(ticker.askPx || 0) * (okxSpot || 1)
+    entry.prices.okx = { bid, ask }
     if (bid > entry.bestBid) { entry.bestBid = bid; entry.bestBidEx = 'okx' }
     if (ask > 0 && (entry.bestAsk === 0 || ask < entry.bestAsk)) { entry.bestAsk = ask; entry.bestAskEx = 'okx' }
+    // fwdPx from opt-summary = forward price of underlying in USD
+    const okxFwd = parseFloat(item.fwdPx || 0)
+    if (okxFwd > 0 && !forwardPrices[parsed.expiryDate]) forwardPrices[parsed.expiryDate] = okxFwd
     const delta = parseFloat(item.delta || 0)
     if (delta !== 0) {
       entry.delta = delta
       entry.gamma = okxSpot > 0 ? parseFloat(item.gamma || 0) / okxSpot : 0
       entry.theta = parseFloat(item.theta || 0) * okxSpot
-      entry.vega  = parseFloat(item.vega || 0) * okxSpot
+      entry.vega  = parseFloat(item.vega  || 0) * okxSpot
     }
+    const oMarkVol = parseFloat(item.markVol || 0)
+    const oBidVol  = parseFloat(item.bidVol  || 0)
+    const oAskVol  = parseFloat(item.askVol  || 0)
+    if (oMarkVol > 0) entry.markVol = oMarkVol
+    if (oBidVol  > 0) entry.bidVol  = oBidVol
+    if (oAskVol  > 0) entry.askVol  = oAskVol
   }
   const deribitResp = buildDeribitResponse(baseCoin)
   if (deribitResp) {
     for (const [expiryDate, dateData] of Object.entries(deribitResp.data)) {
+      // Deribit's forwardPrice comes from underlying_price on each option summary
+      if (dateData.forwardPrice > 0 && !forwardPrices[expiryDate]) {
+        forwardPrices[expiryDate] = dateData.forwardPrice
+      }
       for (const contract of [...dateData.calls, ...dateData.puts]) {
         const key   = `${expiryDate}|${contract.strike}|${contract.optionType}`
         const entry = ensure(key)
+        entry.prices.deribit = { bid: contract.bid, ask: contract.ask }
         if (contract.bid > entry.bestBid) { entry.bestBid = contract.bid; entry.bestBidEx = 'deribit' }
         if (contract.ask > 0 && (entry.bestAsk === 0 || contract.ask < entry.bestAsk)) { entry.bestAsk = contract.ask; entry.bestAskEx = 'deribit' }
         if (contract.delta !== 0) {
@@ -182,6 +220,9 @@ function buildCombinedResponse(baseCoin) {
           entry.theta = contract.theta
           entry.vega  = contract.vega
         }
+        if (contract.markVol > 0) entry.markVol = contract.markVol
+        if (contract.bidVol  > 0) entry.bidVol  = contract.bidVol
+        if (contract.askVol  > 0) entry.askVol  = contract.askVol
       }
     }
   }
@@ -189,7 +230,9 @@ function buildCombinedResponse(baseCoin) {
   for (const [key, entry] of Object.entries(merged)) {
     const [expiryDate, strikeStr, optionType] = key.split('|')
     const contract = { strike: parseFloat(strikeStr), optionType, ...entry }
-    if (!optionsByDate[expiryDate]) optionsByDate[expiryDate] = { calls: [], puts: [] }
+    if (!optionsByDate[expiryDate]) {
+      optionsByDate[expiryDate] = { calls: [], puts: [], forwardPrice: forwardPrices[expiryDate] ?? 0 }
+    }
     if (optionType === 'call') optionsByDate[expiryDate].calls.push(contract)
     else optionsByDate[expiryDate].puts.push(contract)
   }
@@ -632,6 +675,8 @@ function normalizeRestTicker(t) {
     theta:             t.theta           ?? '0',
     vega:              t.vega            ?? '0',
     impliedVolatility: t.markIv          ?? '0',
+    bid1Iv:            t.bid1Iv          ?? '0',
+    ask1Iv:            t.ask1Iv          ?? '0',
     openInterest:      t.openInterest    ?? '0',
     markPrice:         t.markPrice       ?? '0',
     underlyingPrice:   t.underlyingPrice ?? '0',
@@ -652,6 +697,7 @@ async function pollBybit(coin) {
     if (data) {
       emitSSE('bybit',    coin, data)
       emitSSE('combined', coin, buildCombinedResponse(coin))
+      updateAnalysisCache(`bybit:${coin}`, data, bybitSpotCache[coin] ?? 0)
     }
   } catch (err) {
     console.error(`Bybit REST poll error (${coin}):`, err.message)
@@ -690,6 +736,7 @@ async function pollOkxTickers(instFamily) {
     const coin = instFamily.split('-')[0]
     emitSSE('okx',      instFamily, buildOkxResponse(instFamily))
     emitSSE('combined', coin,       buildCombinedResponse(coin))
+    updateAnalysisCache(`okx:${instFamily}`, buildOkxResponse(instFamily), okxSpotCache[`${coin}-USDT`] ?? 0)
   } catch (err) {
     console.error(`OKX ticker poll error (${instFamily}):`, err.message);
   }
@@ -849,7 +896,24 @@ app.get('/api/derive/options/:coin', (req, res) => {
   res.json(response)
 })
 
+// ─── Analysis Route ───────────────────────────────────────────────────────────
+
+app.get('/api/analysis/:exchange/:coin', (req, res) => {
+  const { exchange } = req.params
+  const coin = req.params.coin.toUpperCase()
+  const key = `${exchange}:${coin}`
+  const cached = analysisCache[key]
+  if (!cached) return res.status(503).json({ error: 'Analysis cache warming up, try again shortly' })
+  res.json(cached)
+})
+
 // Debug: inspect raw Derive cache to see actual field names
+app.get('/api/futures/:coin', (req, res) => {
+  const coin = req.params.coin.toUpperCase()
+  if (!futuresCache[coin]) return res.status(400).json({ error: `Unsupported coin: ${coin}` })
+  res.json({ coin, futures: futuresCache[coin] })
+})
+
 app.get('/api/derive/debug/:coin', (req, res) => {
   const coin = req.params.coin.toUpperCase()
   const keys = Object.keys(deriveTickersCache).filter(k => k.startsWith(`${coin}-`))
@@ -863,6 +927,7 @@ startOkxTickerPolling();
 startBybitPolling()
 startDeribitPolling()
 startDeribitWS()
+startFuturesPolling()
 // Derive WS is demand-driven — started by addDeriveViewer() when first SSE client connects
 
 // ─── SSE Push Callbacks ───────────────────────────────────────────────────────
@@ -876,7 +941,11 @@ setDeribitUpdateCallback((coin) => emitDeribit(coin))
 setInterval(() => {
   for (const coin of ['BTC', 'ETH', 'SOL']) {
     const data = buildDeribitResponse(coin)
-    if (data) emitSSE('deribit', coin, data)
+    if (data) {
+      emitSSE('deribit', coin, data)
+      updateAnalysisCache(`deribit:${coin}`, data, bybitSpotCache[coin] ?? 0)
+      updateAnalysisCache(`combined:${coin}`, buildCombinedResponse(coin), bybitSpotCache[coin] ?? 0)
+    }
   }
 }, 5000)
 
