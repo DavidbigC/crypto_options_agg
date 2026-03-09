@@ -49,18 +49,19 @@ export function computeAnalysis(response, spotPrice) {
     const T = Math.max(1e-4, (expiryMs - now) / MS_PER_YEAR)
     const dte = Math.round(T * 365.25)
     const fit = sviFits[exp]
-    const label = new Date(exp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const label = new Date(exp + 'T08:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 
     let atmIV = null
     if (fit) {
       atmIV = Math.round(sviIV(0, T, fit.params) * 1000) / 10
     } else {
       const chain = response.data[exp]
-      if (chain?.calls?.length) {
-        const atm = chain.calls.reduce((b, c) =>
+      const allContracts = [...(chain?.calls ?? []), ...(chain?.puts ?? [])]
+      if (allContracts.length) {
+        const atm = allContracts.reduce((b, c) =>
           Math.abs(c.strike - spotPrice) < Math.abs(b.strike - spotPrice) ? c : b
         )
-        if (atm.markVol) atmIV = Math.round(atm.markVol * 1000) / 10
+        if (atm?.markVol) atmIV = Math.round(atm.markVol * 1000) / 10
       }
     }
 
@@ -92,7 +93,7 @@ export function computeAnalysis(response, spotPrice) {
 
     const rr = parseFloat(((call25.markVol - put25.markVol) * 100).toFixed(2))
     const bf = parseFloat((((call25.markVol + put25.markVol) / 2 - atmCall.markVol) * 100).toFixed(2))
-    const label = new Date(exp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    const label = new Date(exp + 'T08:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
     skewData.push({ label, rr, bf, exp })
   }
 

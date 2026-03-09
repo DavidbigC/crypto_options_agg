@@ -734,9 +734,10 @@ async function pollOkxTickers(instFamily) {
       cache[t.instId] = t;
     }
     const coin = instFamily.split('-')[0]
-    emitSSE('okx',      instFamily, buildOkxResponse(instFamily))
+    const okxResp = buildOkxResponse(instFamily)
+    emitSSE('okx',      instFamily, okxResp)
     emitSSE('combined', coin,       buildCombinedResponse(coin))
-    updateAnalysisCache(`okx:${instFamily}`, buildOkxResponse(instFamily), okxSpotCache[`${coin}-USDT`] ?? 0)
+    updateAnalysisCache(`okx:${instFamily}`, okxResp, okxSpotCache[`${coin}-USDT`] ?? 0)
   } catch (err) {
     console.error(`OKX ticker poll error (${instFamily}):`, err.message);
   }
