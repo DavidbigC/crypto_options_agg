@@ -47,6 +47,12 @@ export default function Header({ exchange, onExchangeChange }: HeaderProps) {
 
           <div className="flex-1" />
 
+          <a href="/analysis" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
+            Analysis
+          </a>
+          <a href="/optimizer" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
+            Optimizer
+          </a>
           <a href="/builder" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
             Strategy Builder
           </a>
