@@ -956,16 +956,18 @@ app.get('/api/scanners/:exchange/:coin', (req, res) => {
 
 app.post('/api/optimizer/:coin', (req, res) => {
   const coin    = req.params.coin.toUpperCase()
+  const VALID_COINS = ['BTC', 'ETH', 'SOL']
+  if (!VALID_COINS.includes(coin)) return res.status(400).json({ error: `Unsupported coin: ${coin}` })
+
   const { targets = {}, maxCost = 0, maxLegs = 4 } = req.body
 
-  const combined = buildCombinedResponse(coin)
-  if (!combined) return res.json([])
-
-  const spotPrice = combined.spotPrice || 0
-  const futures   = futuresCache[coin] ?? []
-
   try {
-    const results = runOptimizer(combined, spotPrice, futures, targets, maxCost, Math.min(maxLegs, 6))
+    const combined  = buildCombinedResponse(coin)
+    if (!combined) return res.json([])
+
+    const spotPrice = combined.spotPrice || 0
+    const futures   = futuresCache[coin] ?? []
+    const results   = runOptimizer(combined, spotPrice, futures, targets, maxCost, Math.min(maxLegs, 6))
     res.json(results)
   } catch (err) {
     console.error('optimizer error:', err)
