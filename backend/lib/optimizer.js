@@ -246,6 +246,48 @@ function enumSingleExpiry(expiry, chain, spotPrice, maxLegs) {
         { side: 'sell', type: 'put',  strike: b.otmPut1,  expiry, qty: 1 },
       ])
     }
+
+    // Vertical spreads
+    if (b.otmCall1 !== b.atm) {
+      add('Bull Call Spread', [
+        { side: 'buy',  type: 'call', strike: b.atm,      expiry, qty: 1 },
+        { side: 'sell', type: 'call', strike: b.otmCall1, expiry, qty: 1 },
+      ])
+      add('Bear Call Spread', [
+        { side: 'sell', type: 'call', strike: b.atm,      expiry, qty: 1 },
+        { side: 'buy',  type: 'call', strike: b.otmCall1, expiry, qty: 1 },
+      ])
+    }
+    if (b.otmPut1 !== b.atm) {
+      add('Bear Put Spread', [
+        { side: 'buy',  type: 'put', strike: b.atm,      expiry, qty: 1 },
+        { side: 'sell', type: 'put', strike: b.otmPut1,  expiry, qty: 1 },
+      ])
+      add('Bull Put Spread', [
+        { side: 'sell', type: 'put', strike: b.atm,      expiry, qty: 1 },
+        { side: 'buy',  type: 'put', strike: b.otmPut1,  expiry, qty: 1 },
+      ])
+    }
+
+    // Risk reversal (bullish: long OTM call + short OTM put)
+    if (b.otmCall1 !== b.atm && b.otmPut1 !== b.atm) {
+      add('Risk Reversal (Bullish)', [
+        { side: 'buy',  type: 'call', strike: b.otmCall1, expiry, qty: 1 },
+        { side: 'sell', type: 'put',  strike: b.otmPut1,  expiry, qty: 1 },
+      ])
+      add('Risk Reversal (Bearish)', [
+        { side: 'buy',  type: 'put',  strike: b.otmPut1,  expiry, qty: 1 },
+        { side: 'sell', type: 'call', strike: b.otmCall1, expiry, qty: 1 },
+      ])
+    }
+
+    // Long Guts: buy ITM call + ITM put (intrinsic-heavy long vol)
+    if (b.itmCall1 !== b.atm) {
+      add('Long Guts', [
+        { side: 'buy', type: 'call', strike: b.itmCall1, expiry, qty: 1 },
+        { side: 'buy', type: 'put',  strike: b.itmPut1,  expiry, qty: 1 },
+      ])
+    }
   }
 
   if (maxLegs >= 3) {
