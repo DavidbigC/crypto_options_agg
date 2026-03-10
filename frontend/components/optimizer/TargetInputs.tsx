@@ -5,16 +5,18 @@ import { OptimizerTargets, GreekTarget } from '@/types/optimizer'
 import classNames from 'classnames'
 
 interface TargetInputsProps {
-  coin:            'BTC' | 'ETH' | 'SOL'
-  targets:         OptimizerTargets
-  maxCost:         number
-  maxLegs:         number
-  loading:         boolean
-  onCoinChange:    (c: 'BTC' | 'ETH' | 'SOL') => void
-  onTargetChange:  (greek: keyof OptimizerTargets, val: GreekTarget) => void
-  onMaxCostChange: (v: number) => void
-  onMaxLegsChange: (v: number) => void
-  onRun:           () => void
+  coin:                'BTC' | 'ETH' | 'SOL'
+  targets:             OptimizerTargets
+  maxCost:             number
+  maxLegs:             number
+  targetExpiry:        string
+  loading:             boolean
+  onCoinChange:        (c: 'BTC' | 'ETH' | 'SOL') => void
+  onTargetChange:      (greek: keyof OptimizerTargets, val: GreekTarget) => void
+  onMaxCostChange:     (v: number) => void
+  onMaxLegsChange:     (v: number) => void
+  onTargetExpiryChange:(v: string) => void
+  onRun:               () => void
 }
 
 const GREEK_OPTIONS: GreekTarget[] = ['long', 'short', 'neutral', 'ignore']
@@ -37,8 +39,8 @@ const COINS: ('BTC' | 'ETH' | 'SOL')[] = ['BTC', 'ETH', 'SOL']
 const LEG_OPTIONS = [2, 3, 4, 5, 6]
 
 export default function TargetInputs({
-  coin, targets, maxCost, maxLegs, loading,
-  onCoinChange, onTargetChange, onMaxCostChange, onMaxLegsChange, onRun,
+  coin, targets, maxCost, maxLegs, targetExpiry, loading,
+  onCoinChange, onTargetChange, onMaxCostChange, onMaxLegsChange, onTargetExpiryChange, onRun,
 }: TargetInputsProps) {
   return (
     <div className="card space-y-4">
@@ -130,6 +132,28 @@ export default function TargetInputs({
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Target expiry */}
+      <div>
+        <label className="text-[11px] text-ink-2 font-medium block mb-1.5">
+          Target Expiry
+          {!targetExpiry && <span className="text-ink-3 ml-1">— all expiries</span>}
+        </label>
+        <input
+          type="date"
+          value={targetExpiry}
+          onChange={e => onTargetExpiryChange(e.target.value)}
+          className="w-full px-2.5 py-1.5 text-sm rounded border border-rim bg-card text-ink focus:outline-none focus:border-ink-3"
+        />
+        {targetExpiry && (
+          <button
+            onClick={() => onTargetExpiryChange('')}
+            className="mt-1 text-[10px] text-ink-3 hover:text-ink transition-colors"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Run */}

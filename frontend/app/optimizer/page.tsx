@@ -22,6 +22,7 @@ export default function OptimizerPage() {
   const [loading, setLoading]     = useState(false)
   const [results, setResults]     = useState<OptimizerResult[]>([])
   const [error, setError]         = useState<string | null>(null)
+  const [targetExpiry, setTargetExpiry] = useState('')
   const [spotPrice]               = useState(0)
 
   const handleTargetChange = (greek: keyof OptimizerTargets, val: GreekTarget) => {
@@ -35,7 +36,7 @@ export default function OptimizerPage() {
       const res = await fetch(`http://localhost:3500/api/optimizer/${coin}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets, maxCost, maxLegs }),
+        body: JSON.stringify({ targets, maxCost, maxLegs, targetExpiry: targetExpiry || null }),
       })
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const data: OptimizerResult[] = await res.json()
@@ -66,6 +67,8 @@ export default function OptimizerPage() {
               onTargetChange={handleTargetChange}
               onMaxCostChange={setMaxCost}
               onMaxLegsChange={setMaxLegs}
+              targetExpiry={targetExpiry}
+              onTargetExpiryChange={setTargetExpiry}
               onRun={handleRun}
             />
           </div>
