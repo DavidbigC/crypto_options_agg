@@ -479,8 +479,9 @@ function enumCalendars(expirations, chainByExpiry, spotPrice, maxLegs, exchanges
   const candidates = []
 
   for (let i = 0; i < expirations.length - 1; i++) {
+  for (let j = i + 1; j < expirations.length; j++) {
     const nearExp = expirations[i]
-    const farExp  = expirations[i + 1]
+    const farExp  = expirations[j]
     const nearChain = chainByExpiry[nearExp]
     const farChain  = chainByExpiry[farExp]
     if (!nearChain || !farChain) continue
@@ -528,6 +529,7 @@ function enumCalendars(expirations, chainByExpiry, spotPrice, maxLegs, exchanges
         { side: 'buy',  type: 'put',  strike: bFar.atm,  expiry: farExp,  qty: 1 },
       ])
     }
+  }
   }
 
   return candidates
