@@ -2,7 +2,7 @@
 
 import classNames from 'classnames'
 import { Leg, OptionsData } from '@/types/options'
-import { bsGreeks } from '@/lib/blackScholes'
+import { bsGreeks, bsPrice } from '@/lib/blackScholes'
 import { EX_SOFT, EX_LABEL } from '@/lib/exchangeColors'
 
 interface LegsPanelProps {
@@ -44,7 +44,11 @@ export default function LegsPanel({ legs, spotPrice, optionsData, onUpdate, onRe
     if (!chain) return 0
     const arr = leg.type === 'call' ? chain.calls : chain.puts
     const contract = arr.find(c => c.strike === leg.strike)
-    return contract?.markPrice ?? 0
+    if (contract?.markPrice && contract.markPrice > 0) return contract.markPrice
+    const daysToExpiry = Math.max(0, (new Date(leg.expiry).getTime() - Date.now()) / 86_400_000)
+    const T = Math.max(0, daysToExpiry / 365)
+    const sigma = Math.max(0.001, contract?.markVol || contract?.impliedVolatility || leg.markVol || 0.5)
+    return bsPrice(spotPrice, leg.strike, T, sigma, 0, leg.type)
   }
 
   const totalCost = legs.filter(l => l.enabled).reduce((sum, l) => {
