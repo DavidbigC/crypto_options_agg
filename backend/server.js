@@ -22,7 +22,8 @@ import { addDeriveViewer, removeDeriveViewer, deriveTickersCache, deriveSpotCach
 import { futuresCache, startFuturesPolling } from './lib/futures.js';
 import { analysisCache, updateAnalysisCache } from './lib/analysis.js'
 import { arbCache, updateArbCache } from './lib/arbs.js'
-import { scannerCache, updateScannerCache } from './lib/scanners.js'
+import { scannerCache, updateScannerCache, computeGammaRows, computeVegaRows } from './lib/scanners.js'
+import { runOptimizer } from './lib/optimizer.js'
 
 dotenv.config();
 
@@ -930,10 +931,46 @@ app.get('/api/arbs/:coin', (req, res) => {
 app.get('/api/scanners/:exchange/:coin', (req, res) => {
   const { exchange } = req.params
   const coin = req.params.coin.toUpperCase()
-  const key = `${exchange}:${coin}`
-  const cached = scannerCache[key]
+  const exchangesParam = req.query.exchanges
+
+  // If a filtered exchange list is requested, compute on-the-fly from the combined cache
+  if (exchangesParam) {
+    const activeExchanges = exchangesParam.split(',').map(e => e.trim()).filter(Boolean)
+    const key = `${exchange}:${coin}`
+    const cached = scannerCache[key]
+    if (!cached) return res.status(503).json({ error: 'Scanner cache warming up' })
+    // Re-use the cached optionsData snapshot stored alongside gamma/vega
+    const { optionsData, spotPrice } = cached._raw ?? {}
+    if (!optionsData) return res.status(503).json({ error: 'Scanner cache warming up' })
+    return res.json({
+      gamma: computeGammaRows(optionsData, spotPrice, activeExchanges),
+      vega:  computeVegaRows(optionsData, spotPrice, activeExchanges),
+      updatedAt: cached.updatedAt,
+    })
+  }
+
+  const cached = scannerCache[`${exchange}:${coin}`]
   if (!cached) return res.status(503).json({ error: 'Scanner cache warming up' })
   res.json(cached)
+})
+
+app.post('/api/optimizer/:coin', (req, res) => {
+  const coin    = req.params.coin.toUpperCase()
+  const { targets = {}, maxCost = 0, maxLegs = 4 } = req.body
+
+  const combined = buildCombinedResponse(coin)
+  if (!combined) return res.json([])
+
+  const spotPrice = combined.spotPrice || 0
+  const futures   = futuresCache[coin] ?? []
+
+  try {
+    const results = runOptimizer(combined, spotPrice, futures, targets, maxCost, Math.min(maxLegs, 6))
+    res.json(results)
+  } catch (err) {
+    console.error('optimizer error:', err)
+    res.status(500).json({ error: err.message })
+  }
 })
 
 // Debug: inspect raw Derive cache to see actual field names
