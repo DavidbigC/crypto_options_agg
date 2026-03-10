@@ -40,4 +40,5 @@ export interface OptimizerRequest {
   maxCost:      number
   maxLegs:      number
   targetExpiry: string | null   // 'YYYY-MM-DD' or null for all expiries
+  exchanges:    string[]
 }

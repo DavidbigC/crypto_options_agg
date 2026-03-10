@@ -23,6 +23,7 @@ export default function OptimizerPage() {
   const [results, setResults]     = useState<OptimizerResult[]>([])
   const [error, setError]         = useState<string | null>(null)
   const [targetExpiry, setTargetExpiry] = useState('')
+  const [exchanges, setExchanges]   = useState<string[]>(['bybit', 'okx', 'deribit'])
   const [spotPrice]               = useState(0)
 
   const handleTargetChange = (greek: keyof OptimizerTargets, val: GreekTarget) => {
@@ -36,7 +37,7 @@ export default function OptimizerPage() {
       const res = await fetch(`http://localhost:3500/api/optimizer/${coin}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets, maxCost, maxLegs, targetExpiry: targetExpiry || null }),
+        body: JSON.stringify({ targets, maxCost, maxLegs, targetExpiry: targetExpiry || null, exchanges }),
       })
       if (!res.ok) throw new Error(`Server error ${res.status}`)
       const data: OptimizerResult[] = await res.json()
@@ -69,6 +70,12 @@ export default function OptimizerPage() {
               onMaxLegsChange={setMaxLegs}
               targetExpiry={targetExpiry}
               onTargetExpiryChange={setTargetExpiry}
+              exchanges={exchanges}
+              onExchangeChange={ex => setExchanges(prev =>
+                prev.includes(ex)
+                  ? prev.length > 1 ? prev.filter(e => e !== ex) : prev  // keep at least 1
+                  : [...prev, ex]
+              )}
               onRun={handleRun}
             />
           </div>

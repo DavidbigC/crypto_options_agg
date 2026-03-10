@@ -20,28 +20,28 @@ function dte(expiry) {
   return Math.max(0, (new Date(expiry + 'T08:00:00Z').getTime() - Date.now()) / 86_400_000)
 }
 
-function bestAsk(contract) {
+function bestAsk(contract, exchanges) {
   let best = 0
-  for (const ex of EXCHANGES) {
+  for (const ex of exchanges) {
     const raw = contract.prices?.[ex]?.ask || 0
     if (raw > 0 && (best === 0 || raw < best)) best = raw
   }
   return best
 }
 
-function bestBid(contract) {
+function bestBid(contract, exchanges) {
   let best = 0
-  for (const ex of EXCHANGES) {
+  for (const ex of exchanges) {
     const raw = contract.prices?.[ex]?.bid || 0
     if (raw > best) best = raw
   }
   return best
 }
 
-function bestExchange(contract, side) {
+function bestExchange(contract, side, exchanges) {
   let bestVal = 0
   let bestEx = null
-  for (const ex of EXCHANGES) {
+  for (const ex of exchanges) {
     const raw = side === 'buy'
       ? (contract.prices?.[ex]?.ask || 0)
       : (contract.prices?.[ex]?.bid || 0)
@@ -166,7 +166,7 @@ function strikeBuckets(chain, spotPrice, expiryStr) {
   }
 }
 
-function buildCandidate(name, legSpecs, chainByExpiry, spotPrice) {
+function buildCandidate(name, legSpecs, chainByExpiry, spotPrice, exchanges) {
   const legs = []
   let totalCost = 0
   const netGreeks = { delta: 0, gamma: 0, theta: 0, vega: 0 }
@@ -185,7 +185,7 @@ function buildCandidate(name, legSpecs, chainByExpiry, spotPrice) {
     const contract = findContract(chain, spec.strike, spec.type)
     if (!contract) return null
 
-    const { price, exchange } = bestExchange(contract, spec.side)
+    const { price, exchange } = bestExchange(contract, spec.side, exchanges)
     if (!price || !exchange) return null
 
     const feePrice = withFee(price, spec.side, exchange, spotPrice)
@@ -205,13 +205,13 @@ function buildCandidate(name, legSpecs, chainByExpiry, spotPrice) {
   return { name, legs, netGreeks, totalCost }
 }
 
-function enumSingleExpiry(expiry, chain, spotPrice, maxLegs) {
+function enumSingleExpiry(expiry, chain, spotPrice, maxLegs, exchanges) {
   const b = strikeBuckets(chain, spotPrice, expiry)
   if (!b) return []
   const candidates = []
 
   const add = (name, legSpecs) => {
-    const c = buildCandidate(name, legSpecs, { [expiry]: chain }, spotPrice)
+    const c = buildCandidate(name, legSpecs, { [expiry]: chain }, spotPrice, exchanges)
     if (c) candidates.push(c)
   }
 
@@ -474,7 +474,7 @@ function enumSingleExpiry(expiry, chain, spotPrice, maxLegs) {
   return candidates
 }
 
-function enumCalendars(expirations, chainByExpiry, spotPrice, maxLegs) {
+function enumCalendars(expirations, chainByExpiry, spotPrice, maxLegs, exchanges) {
   if (maxLegs < 2) return []
   const candidates = []
 
@@ -492,7 +492,7 @@ function enumCalendars(expirations, chainByExpiry, spotPrice, maxLegs) {
     const chains = { [nearExp]: nearChain, [farExp]: farChain }
 
     const add = (name, legSpecs) => {
-      const c = buildCandidate(name, legSpecs, chains, spotPrice)
+      const c = buildCandidate(name, legSpecs, chains, spotPrice, exchanges)
       if (c) candidates.push(c)
     }
 
@@ -552,7 +552,7 @@ function addDeltaHedge(candidate, spotPrice, futures) {
   candidate.netGreeks.delta += (side === 'buy' ? 1 : -1) * qty
 }
 
-export function runOptimizer(combinedOptionsData, spotPrice, futures, targets, maxCost, maxLegs, targetExpiry = null) {
+export function runOptimizer(combinedOptionsData, spotPrice, futures, targets, maxCost, maxLegs, targetExpiry = null, exchanges = ['bybit', 'okx', 'deribit']) {
   if (!combinedOptionsData || !spotPrice) return []
 
   let expirations = futureExpirations(combinedOptionsData.expirations || [])
@@ -573,10 +573,10 @@ export function runOptimizer(combinedOptionsData, spotPrice, futures, targets, m
   for (const expiry of expirations) {
     const chain = chainByExpiry[expiry]
     if (!chain?.calls?.length || !chain?.puts?.length) continue
-    candidates.push(...enumSingleExpiry(expiry, chain, spotPrice, maxLegs))
+    candidates.push(...enumSingleExpiry(expiry, chain, spotPrice, maxLegs, exchanges))
   }
 
-  candidates.push(...enumCalendars(expirations, chainByExpiry, spotPrice, maxLegs))
+  candidates.push(...enumCalendars(expirations, chainByExpiry, spotPrice, maxLegs, exchanges))
 
   if (targets.delta === 'neutral') {
     for (const c of candidates) {

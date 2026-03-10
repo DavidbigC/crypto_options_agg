@@ -3,6 +3,7 @@
 
 import { OptimizerTargets, GreekTarget } from '@/types/optimizer'
 import classNames from 'classnames'
+import { EX_ACTIVE, EX_SOFT, EX_NAME } from '@/lib/exchangeColors'
 
 interface TargetInputsProps {
   coin:                'BTC' | 'ETH' | 'SOL'
@@ -10,6 +11,8 @@ interface TargetInputsProps {
   maxCost:             number
   maxLegs:             number
   targetExpiry:        string
+  exchanges:           string[]
+  onExchangeChange:    (ex: string) => void
   loading:             boolean
   onCoinChange:        (c: 'BTC' | 'ETH' | 'SOL') => void
   onTargetChange:      (greek: keyof OptimizerTargets, val: GreekTarget) => void
@@ -39,7 +42,7 @@ const COINS: ('BTC' | 'ETH' | 'SOL')[] = ['BTC', 'ETH', 'SOL']
 const LEG_OPTIONS = [2, 3, 4, 5, 6]
 
 export default function TargetInputs({
-  coin, targets, maxCost, maxLegs, targetExpiry, loading,
+  coin, targets, maxCost, maxLegs, targetExpiry, exchanges, onExchangeChange, loading,
   onCoinChange, onTargetChange, onMaxCostChange, onMaxLegsChange, onTargetExpiryChange, onRun,
 }: TargetInputsProps) {
   return (
@@ -129,6 +132,25 @@ export default function TargetInputs({
               )}
             >
               {n}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Exchanges */}
+      <div>
+        <label className="text-[11px] text-ink-2 font-medium block mb-1.5">Exchanges</label>
+        <div className="flex gap-1">
+          {(['bybit', 'okx', 'deribit'] as const).map(ex => (
+            <button
+              key={ex}
+              onClick={() => onExchangeChange(ex)}
+              className={classNames(
+                'px-2 py-1 rounded text-[11px] font-semibold transition-colors',
+                exchanges.includes(ex) ? EX_ACTIVE[ex] : EX_SOFT[ex]
+              )}
+            >
+              {EX_NAME[ex]}
             </button>
           ))}
         </div>

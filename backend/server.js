@@ -980,7 +980,12 @@ app.post('/api/optimizer/:coin', (req, res) => {
   const VALID_COINS = ['BTC', 'ETH', 'SOL']
   if (!VALID_COINS.includes(coin)) return res.status(400).json({ error: `Unsupported coin: ${coin}` })
 
-  const { targets = {}, maxCost = 0, maxLegs = 4, targetExpiry = null } = req.body
+  const VALID_EXCHANGES = ['bybit', 'okx', 'deribit']
+  const { targets = {}, maxCost = 0, maxLegs = 4, targetExpiry = null, exchanges: rawExchanges } = req.body
+  const exchanges = Array.isArray(rawExchanges)
+    ? rawExchanges.filter(e => VALID_EXCHANGES.includes(e))
+    : VALID_EXCHANGES
+  const activeExchanges = exchanges.length > 0 ? exchanges : VALID_EXCHANGES
 
   try {
     const combined  = buildCombinedResponse(coin)
@@ -988,7 +993,7 @@ app.post('/api/optimizer/:coin', (req, res) => {
 
     const spotPrice = combined.spotPrice || 0
     const futures   = futuresCache[coin] ?? []
-    const results   = runOptimizer(combined, spotPrice, futures, targets, maxCost, Math.min(maxLegs, 6), targetExpiry || null)
+    const results   = runOptimizer(combined, spotPrice, futures, targets, maxCost, Math.min(maxLegs, 6), targetExpiry || null, activeExchanges)
     res.json(results)
   } catch (err) {
     console.error('optimizer error:', err)
