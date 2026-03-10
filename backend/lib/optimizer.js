@@ -417,6 +417,27 @@ function enumSingleExpiry(expiry, chain, spotPrice, maxLegs) {
         { side: 'buy',  type: 'put',  strike: b.otmPut2,  expiry, qty: 1 },
       ])
     }
+
+    // Reverse Iron Butterfly: long straddle + short wings (defined-risk long vol)
+    if (b.otmCall1 !== b.atm && b.otmPut1 !== b.atm) {
+      add('Reverse Iron Butterfly', [
+        { side: 'buy',  type: 'call', strike: b.atm,      expiry, qty: 1 },
+        { side: 'buy',  type: 'put',  strike: b.atm,      expiry, qty: 1 },
+        { side: 'sell', type: 'call', strike: b.otmCall1, expiry, qty: 1 },
+        { side: 'sell', type: 'put',  strike: b.otmPut1,  expiry, qty: 1 },
+      ])
+    }
+
+    // Reverse Iron Condor: long call spread + long put spread (cheap breakout)
+    if (b.otmCall1 !== b.atm && b.otmPut1 !== b.atm &&
+        b.otmCall2 !== b.otmCall1 && b.otmPut2 !== b.otmPut1) {
+      add('Reverse Iron Condor', [
+        { side: 'buy',  type: 'call', strike: b.otmCall1, expiry, qty: 1 },
+        { side: 'sell', type: 'call', strike: b.otmCall2, expiry, qty: 1 },
+        { side: 'buy',  type: 'put',  strike: b.otmPut1,  expiry, qty: 1 },
+        { side: 'sell', type: 'put',  strike: b.otmPut2,  expiry, qty: 1 },
+      ])
+    }
   }
 
   if (maxLegs >= 5) {
