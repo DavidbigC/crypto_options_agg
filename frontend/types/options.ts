@@ -7,10 +7,18 @@ export interface CombinedOptionContract {
   bestBidEx: 'bybit' | 'okx' | 'deribit' | null
   bestAsk: number
   bestAskEx: 'bybit' | 'okx' | 'deribit' | null
+  prices: {
+    bybit:   { bid: number; ask: number }
+    okx:     { bid: number; ask: number }
+    deribit: { bid: number; ask: number }
+  }
   delta: number
   gamma: number
   theta: number
   vega: number
+  markVol?: number
+  bidVol?: number
+  askVol?: number
 }
 
 export interface CombinedOptionsChainData {
@@ -35,7 +43,6 @@ export interface OptionContract {
   impliedVolatility: number
   openInterest: number
   markPrice: number
-  // OKX-specific implied volatility fields
   markVol?: number
   bidVol?: number
   askVol?: number
@@ -82,13 +89,13 @@ export interface Leg {
   exchange: Exchange
   coin: string             // 'BTC' | 'ETH' | 'SOL'
   symbol: string
-  expiry: string           // 'YYYY-MM-DD'
+  expiry: string           // 'YYYY-MM-DD' or 'perpetual' for perps
   strike: number
-  type: 'call' | 'put'
+  type: 'call' | 'put' | 'future'
   side: 'buy' | 'sell'
   qty: number
   entryPrice: number       // USD
-  markVol: number          // IV decimal e.g. 0.54
+  markVol: number          // IV decimal e.g. 0.54 (unused for futures)
   contractSize: number
   enabled: boolean
 }

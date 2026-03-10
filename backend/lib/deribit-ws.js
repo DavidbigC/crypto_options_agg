@@ -15,7 +15,7 @@ const RECONNECT_BASE_MS = 2_000
 const RECONNECT_MAX_MS = 60_000
 const CHUNK = 200  // channels per subscribe message
 
-// Greeks keyed by instrument_name: { delta, gamma, theta, vega, rho }
+// Keyed by instrument_name: { delta, gamma, theta, vega, rho, bid_iv, ask_iv }
 export const deribitGreeksCache = {}
 
 let _updateCallback = null
@@ -77,7 +77,11 @@ export function startDeribitWS() {
       if (!channel?.startsWith('ticker.') || !data?.greeks) return
 
       const instrument = channel.split('.')[1]
-      deribitGreeksCache[instrument] = data.greeks
+      deribitGreeksCache[instrument] = {
+        ...data.greeks,
+        bid_iv: data.bid_iv,
+        ask_iv: data.ask_iv,
+      }
       if (_updateCallback) {
         const rawCurrency = instrument.split('-')[0]
         _updateCallback(rawCurrency === 'SOL_USDC' ? 'SOL' : rawCurrency)

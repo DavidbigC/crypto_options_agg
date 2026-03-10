@@ -445,10 +445,20 @@ function addDeltaHedge(candidate, spotPrice, futures) {
   candidate.netGreeks.delta += (side === 'buy' ? 1 : -1) * qty
 }
 
-export function runOptimizer(combinedOptionsData, spotPrice, futures, targets, maxCost, maxLegs) {
+export function runOptimizer(combinedOptionsData, spotPrice, futures, targets, maxCost, maxLegs, targetExpiry = null) {
   if (!combinedOptionsData || !spotPrice) return []
 
-  const expirations   = futureExpirations(combinedOptionsData.expirations || [])
+  let expirations = futureExpirations(combinedOptionsData.expirations || [])
+
+  // Filter to target expiry window if specified (±3 days tolerance)
+  if (targetExpiry) {
+    const targetTs = new Date(targetExpiry + 'T08:00:00Z').getTime()
+    const WINDOW_MS = 3 * 86_400_000
+    expirations = expirations.filter(exp => {
+      const expTs = new Date(exp + 'T08:00:00Z').getTime()
+      return Math.abs(expTs - targetTs) <= WINDOW_MS
+    })
+  }
   const chainByExpiry = combinedOptionsData.data || {}
 
   let candidates = []

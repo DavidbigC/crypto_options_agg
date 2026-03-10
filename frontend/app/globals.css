@@ -28,12 +28,14 @@
   html {
     background-color: rgb(var(--c-bg));
     color: rgb(var(--c-text-1));
+    overflow-y: scroll; /* always reserve scrollbar space — prevents layout shift */
   }
 
   body {
     background-color: rgb(var(--c-bg));
     color: rgb(var(--c-text-1));
     font-family: system-ui, -apple-system, sans-serif;
+    font-variant-numeric: tabular-nums;
   }
 }
 

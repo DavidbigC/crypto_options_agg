@@ -6,6 +6,8 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { BybitOptionsAPI } from './lib/bybit-api-axios.js';
 import { mockSpotPrices, getMockOptionsData } from './lib/mock-data.js';
 import {
@@ -23,12 +25,20 @@ import { futuresCache, startFuturesPolling } from './lib/futures.js';
 import { analysisCache, updateAnalysisCache } from './lib/analysis.js'
 import { arbCache, updateArbCache } from './lib/arbs.js'
 import { scannerCache, updateScannerCache, computeGammaRows, computeVegaRows } from './lib/scanners.js'
-import { runOptimizer } from './lib/optimizer.js'
 
-dotenv.config();
+import { runOptimizer } from './lib/optimizer.js'
+import { createOkxPortfolioService } from './lib/okx-portfolio.js'
+import { getEnvPaths } from './lib/env-paths.js'
+
+
+const backendDir = path.dirname(fileURLToPath(import.meta.url))
+for (const envPath of getEnvPaths(backendDir)) {
+  dotenv.config({ path: envPath })
+}
 
 const app = express();
 const PORT = process.env.PORT || 3500;
+const okxPortfolioService = createOkxPortfolioService({ env: process.env })
 
 // Middleware
 app.use(cors());
@@ -628,6 +638,17 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+app.get('/api/portfolio/okx', async (req, res) => {
+  try {
+    const portfolio = await okxPortfolioService.fetchPortfolio()
+    res.json(portfolio)
+  } catch (error) {
+    const message = error?.message || 'Internal server error'
+    const status = /missing okx credentials/i.test(message) ? 503 : 502
+    res.status(status).json({ error: message })
+  }
+})
+
 // ─── OKX Helpers ────────────────────────────────────────────────────────────
 
 function parseOkxInstId(instId) {
@@ -959,7 +980,7 @@ app.post('/api/optimizer/:coin', (req, res) => {
   const VALID_COINS = ['BTC', 'ETH', 'SOL']
   if (!VALID_COINS.includes(coin)) return res.status(400).json({ error: `Unsupported coin: ${coin}` })
 
-  const { targets = {}, maxCost = 0, maxLegs = 4 } = req.body
+  const { targets = {}, maxCost = 0, maxLegs = 4, targetExpiry = null } = req.body
 
   try {
     const combined  = buildCombinedResponse(coin)
@@ -967,7 +988,7 @@ app.post('/api/optimizer/:coin', (req, res) => {
 
     const spotPrice = combined.spotPrice || 0
     const futures   = futuresCache[coin] ?? []
-    const results   = runOptimizer(combined, spotPrice, futures, targets, maxCost, Math.min(maxLegs, 6))
+    const results   = runOptimizer(combined, spotPrice, futures, targets, maxCost, Math.min(maxLegs, 6), targetExpiry || null)
     res.json(results)
   } catch (err) {
     console.error('optimizer error:', err)

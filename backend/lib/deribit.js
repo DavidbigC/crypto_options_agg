@@ -149,9 +149,15 @@ export function buildDeribitResponse(coin) {
       openInterest:      s.open_interest ?? 0,
       markPrice,
       markVol,
+      bidVol:  g?.bid_iv != null ? g.bid_iv / 100 : 0,
+      askVol:  g?.ask_iv != null ? g.ask_iv / 100 : 0,
     }
 
-    if (!optionsByDate[expiry]) optionsByDate[expiry] = { calls: [], puts: [] }
+    if (!optionsByDate[expiry]) {
+      // underlying_price = USD forward price for this expiry (matches the futures/perp mark)
+      const fwdPrice = parseFloat(s.underlying_price ?? 0) * (config.priceInCoin ? 1 : 1)
+      optionsByDate[expiry] = { calls: [], puts: [], forwardPrice: fwdPrice }
+    }
     if (optionType === 'call') optionsByDate[expiry].calls.push(contract)
     else                       optionsByDate[expiry].puts.push(contract)
   }

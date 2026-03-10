@@ -126,36 +126,46 @@ export default function HomePage() {
       const counts = { bybit: 0, okx: 0, deribit: 0 }
       const contracts = [...((chainData as any).calls ?? []), ...((chainData as any).puts ?? [])]
       for (const c of contracts) {
-        if (c.prices?.bybit?.bid > 0  || c.prices?.bybit?.ask > 0)  counts.bybit++
-        if (c.prices?.okx?.bid > 0    || c.prices?.okx?.ask > 0)    counts.okx++
-        if (c.prices?.deribit?.bid > 0 || c.prices?.deribit?.ask > 0) counts.deribit++
+        if (activeExchanges.has('bybit')   && (c.prices?.bybit?.bid > 0   || c.prices?.bybit?.ask > 0))   counts.bybit++
+        if (activeExchanges.has('okx')     && (c.prices?.okx?.bid > 0     || c.prices?.okx?.ask > 0))     counts.okx++
+        if (activeExchanges.has('deribit') && (c.prices?.deribit?.bid > 0 || c.prices?.deribit?.ask > 0)) counts.deribit++
       }
       result[expiry] = counts
     }
     return result
-  }, [exchange, optionsData])
+  }, [exchange, optionsData, activeExchanges])
+
+  const activeBoxSpreads = useMemo(
+    () => boxSpreads.filter(b => b.legs.every(l => !l.exchange || activeExchanges.has(l.exchange as ExchangeKey))),
+    [boxSpreads, activeExchanges]
+  )
+
+  const activeAllArbs = useMemo(
+    () => allArbs.filter(a => a.legs.every(l => !l.exchange || activeExchanges.has(l.exchange as ExchangeKey))),
+    [allArbs, activeExchanges]
+  )
 
   const arbExpiryStrategies = useMemo(() => {
     const map = new Map<string, Set<string>>()
-    for (const b of boxSpreads) {
+    for (const b of activeBoxSpreads) {
       if (!map.has(b.expiry)) map.set(b.expiry, new Set())
       map.get(b.expiry)!.add(b.type === 'long' ? 'box_long' : 'box_short')
     }
-    for (const a of allArbs) {
+    for (const a of activeAllArbs) {
       if (!map.has(a.expiry)) map.set(a.expiry, new Set())
       map.get(a.expiry)!.add(a.strategy)
     }
     return map
-  }, [boxSpreads, allArbs])
+  }, [activeBoxSpreads, activeAllArbs])
 
   const boxSpreadsForExpiry = useMemo(
-    () => boxSpreads.filter(b => b.expiry === selectedExpiration),
-    [boxSpreads, selectedExpiration]
+    () => activeBoxSpreads.filter(b => b.expiry === selectedExpiration),
+    [activeBoxSpreads, selectedExpiration]
   )
 
   const arbsForExpiry = useMemo(
-    () => allArbs.filter(a => a.expiry === selectedExpiration),
-    [allArbs, selectedExpiration]
+    () => activeAllArbs.filter(a => a.expiry === selectedExpiration),
+    [activeAllArbs, selectedExpiration]
   )
 
   const chainData = selectedExpiration ? optionsData?.data?.[selectedExpiration] : undefined
@@ -212,7 +222,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {activeScanner === 'gamma' && (
+        <div className={activeScanner === 'gamma' ? '' : 'hidden'}>
           <GammaScanner
             optionsData={optionsData}
             spotPrice={spotPrice}
@@ -220,8 +230,8 @@ export default function HomePage() {
             exchange={exchange}
             activeExchanges={activeExchanges}
           />
-        )}
-        {activeScanner === 'vega' && (
+        </div>
+        <div className={activeScanner === 'vega' ? '' : 'hidden'}>
           <VegaScanner
             optionsData={optionsData}
             spotPrice={spotPrice}
@@ -229,7 +239,7 @@ export default function HomePage() {
             exchange={exchange}
             activeExchanges={activeExchanges}
           />
-        )}
+        </div>
 
         {/* Options chain */}
         {loading ? (

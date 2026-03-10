@@ -1,8 +1,103 @@
 import { fitSVI, sviIV } from './svi.js'
 
 const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000
+const RAW_SURFACE_BUCKET_STEP = 0.05
+const RAW_SURFACE_BUCKET_MIN = -0.35
+const RAW_SURFACE_BUCKET_MAX = 0.35
 
 export const analysisCache = {}
+
+function makeRawSurfaceBucketCenters() {
+  const centers = []
+  for (let bucket = RAW_SURFACE_BUCKET_MIN; bucket <= RAW_SURFACE_BUCKET_MAX + 1e-9; bucket += RAW_SURFACE_BUCKET_STEP) {
+    centers.push(Number(bucket.toFixed(3)))
+  }
+  return centers
+}
+
+function formatBucketLabel(bucketCenter) {
+  if (Math.abs(bucketCenter) < RAW_SURFACE_BUCKET_STEP / 2) return 'ATM'
+
+  const pct = (Math.exp(bucketCenter) - 1) * 100
+  const rounded = Math.round(pct / 5) * 5
+  return `${rounded > 0 ? '+' : ''}${rounded}%`
+}
+
+function computeRawSurface(expirations, response, spotPrice, now) {
+  const bucketCenters = makeRawSurfaceBucketCenters()
+  const buckets = bucketCenters.map(center => ({
+    key: center,
+    label: formatBucketLabel(center),
+    moneynessPct: Number((((Math.exp(center) - 1) * 100)).toFixed(1)),
+  }))
+
+  const cells = []
+  const expiryRows = []
+
+  for (const exp of expirations) {
+    const chain = response.data[exp]
+    if (!chain) continue
+
+    const expiryMs = new Date(exp + 'T08:00:00Z').getTime()
+    const dte = Math.round(Math.max(1e-4, (expiryMs - now) / MS_PER_YEAR) * 365.25)
+    const label = new Date(exp + 'T08:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+    const bucketMap = new Map(bucketCenters.map(center => [center, []]))
+
+    for (const c of chain.calls ?? []) {
+      const mv = c.markVol ?? 0
+      if (c.strike < spotPrice || mv <= 0) continue
+      const k = Math.log(c.strike / spotPrice)
+      const center = bucketCenters.reduce((best, current) =>
+        Math.abs(current - k) < Math.abs(best - k) ? current : best
+      )
+      if (Math.abs(center - k) <= RAW_SURFACE_BUCKET_STEP / 2) {
+        bucketMap.get(center)?.push({ iv: mv * 100, strike: c.strike, optionType: 'call' })
+      }
+    }
+
+    for (const p of chain.puts ?? []) {
+      const mv = p.markVol ?? 0
+      if (p.strike > spotPrice || mv <= 0) continue
+      const k = Math.log(p.strike / spotPrice)
+      const center = bucketCenters.reduce((best, current) =>
+        Math.abs(current - k) < Math.abs(best - k) ? current : best
+      )
+      if (Math.abs(center - k) <= RAW_SURFACE_BUCKET_STEP / 2) {
+        bucketMap.get(center)?.push({ iv: mv * 100, strike: p.strike, optionType: 'put' })
+      }
+    }
+
+    let cellCount = 0
+    for (const center of bucketCenters) {
+      const points = bucketMap.get(center) ?? []
+      if (!points.length) continue
+
+      cellCount++
+      const ivSum = points.reduce((sum, point) => sum + point.iv, 0)
+      const strikes = points.map(point => point.strike)
+      const optionTypes = Array.from(new Set(points.map(point => point.optionType)))
+      cells.push({
+        exp,
+        label,
+        dte,
+        bucketKey: center,
+        bucketLabel: formatBucketLabel(center),
+        moneynessPct: Number((((Math.exp(center) - 1) * 100)).toFixed(1)),
+        avgMarkIV: Number((ivSum / points.length).toFixed(1)),
+        count: points.length,
+        minStrike: Math.min(...strikes),
+        maxStrike: Math.max(...strikes),
+        optionTypes,
+      })
+    }
+
+    if (cellCount > 0) {
+      expiryRows.push({ exp, label, dte })
+    }
+  }
+
+  return { expiries: expiryRows, buckets, cells }
+}
 
 export function computeAnalysis(response, spotPrice) {
   if (!response || !spotPrice || !response.expirations?.length) return null
@@ -13,6 +108,8 @@ export function computeAnalysis(response, spotPrice) {
   })
 
   if (!expirations.length) return null
+
+  const rawSurface = computeRawSurface(expirations, response, spotPrice, now)
 
   // Compute SVI fits
   const sviFits = {}
@@ -98,7 +195,7 @@ export function computeAnalysis(response, spotPrice) {
     skewData.push({ label, rr, bf, exp })
   }
 
-  return { sviFits, termStructure, skewData, updatedAt: now }
+  return { sviFits, termStructure, skewData, rawSurface, updatedAt: now }
 }
 
 export function updateAnalysisCache(cacheKey, response, spotPrice) {

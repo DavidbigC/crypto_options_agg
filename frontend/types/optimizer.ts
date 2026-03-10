@@ -36,7 +36,8 @@ export interface OptimizerResult {
 }
 
 export interface OptimizerRequest {
-  targets:  OptimizerTargets
-  maxCost:  number
-  maxLegs:  number
+  targets:      OptimizerTargets
+  maxCost:      number
+  maxLegs:      number
+  targetExpiry: string | null   // 'YYYY-MM-DD' or null for all expiries
 }

@@ -30,6 +30,36 @@ export default function AnalysisPage() {
     sviFits: Record<string, { params: { a: number; b: number; rho: number; m: number; sigma: number }; rmse: number; T: number } | null>
     termStructure: Array<{ label: string; dte: number; atmIV: number; exp: string }>
     skewData: Array<{ label: string; rr: number; bf: number; exp: string }>
+    rawSurface: {
+      expiries: Array<{ exp: string; label: string; dte: number }>
+      buckets: Array<{ key: number; label: string; moneynessPct: number }>
+      cells: Array<{
+        exp: string
+        label: string
+        dte: number
+        bucketKey: number
+        bucketLabel: string
+        moneynessPct: number
+        avgMarkIV: number
+        count: number
+        minStrike: number
+        maxStrike: number
+        optionTypes: string[]
+      }>
+    }
+  } | null>(null)
+  const [activeSurfaceCell, setActiveSurfaceCell] = useState<{
+    exp: string
+    label: string
+    dte: number
+    bucketKey: number
+    bucketLabel: string
+    moneynessPct: number
+    avgMarkIV: number
+    count: number
+    minStrike: number
+    maxStrike: number
+    optionTypes: string[]
   } | null>(null)
   const fetchVersion = useRef(0)
   const selectedExpirationRef = useRef('')
@@ -51,10 +81,31 @@ export default function AnalysisPage() {
         const data = JSON.parse(e.data)
         if (!data || data.error || !data.data) return
         setOptionsData(prev => {
-          const merged = prev ? { ...prev, data: { ...prev.data, ...data.data } } : data
-          merged.spotPrice = data.spotPrice ?? merged.spotPrice
-          if (data.expirations?.length) merged.expirations = data.expirations
-          return merged
+          if (!prev) return data
+          const mergedData = { ...prev.data }
+          for (const [exp, chain] of Object.entries(data.data as Record<string, { calls: any[]; puts: any[] }>)) {
+            if (prev.data[exp]) {
+              const mergeIV = (prev: any, next: any) => ({
+                ...prev, ...next,
+                markVol: next.markVol || prev?.markVol,
+                bidVol:  next.bidVol  || prev?.bidVol,
+                askVol:  next.askVol  || prev?.askVol,
+              })
+              const callMap = new Map(prev.data[exp].calls.map((c: any) => [c.strike, c]))
+              for (const c of chain.calls) callMap.set(c.strike, mergeIV(callMap.get(c.strike), c))
+              const putMap = new Map(prev.data[exp].puts.map((p: any) => [p.strike, p]))
+              for (const p of chain.puts) putMap.set(p.strike, mergeIV(putMap.get(p.strike), p))
+              mergedData[exp] = { calls: Array.from(callMap.values()), puts: Array.from(putMap.values()) }
+            } else {
+              mergedData[exp] = chain
+            }
+          }
+          return {
+            ...prev,
+            data: mergedData,
+            spotPrice: data.spotPrice ?? prev.spotPrice,
+            expirations: data.expirations?.length ? data.expirations : prev.expirations,
+          }
         })
         if (data.spotPrice > 0) setSpotPrice(data.spotPrice)
         setLoading(false)
@@ -86,6 +137,10 @@ export default function AnalysisPage() {
     return () => { cancelled = true; clearInterval(id) }
   }, [exchange, selectedCrypto])
 
+  useEffect(() => {
+    setActiveSurfaceCell(null)
+  }, [analysisData?.rawSurface])
+
   const handleExchangeChange = (ex: Exchange) => {
     fetchVersion.current++
     setExchange(ex)
@@ -102,6 +157,7 @@ export default function AnalysisPage() {
 
   const termStructure = analysisData?.termStructure ?? []
   const skewData = analysisData?.skewData ?? []
+  const rawSurface = analysisData?.rawSurface ?? null
 
   // Smile chart data: raw scatter + fitted SVI curve, merged into one array
   const smileChartData = useMemo(() => {
@@ -158,6 +214,27 @@ export default function AnalysisPage() {
     new Date(exp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 
   const hasIVData = smileChartData.some(d => d.mark !== null)
+  const surfaceCells = rawSurface?.cells ?? []
+  const surfaceMinIV = surfaceCells.length ? Math.min(...surfaceCells.map(cell => cell.avgMarkIV)) : 0
+  const surfaceMaxIV = surfaceCells.length ? Math.max(...surfaceCells.map(cell => cell.avgMarkIV)) : 0
+  const activeSurfaceDetails = activeSurfaceCell ?? surfaceCells[0] ?? null
+
+  const surfaceCellMap = useMemo(() => {
+    const map = new Map<string, (typeof surfaceCells)[number]>()
+    for (const cell of surfaceCells) {
+      map.set(`${cell.bucketKey}|${cell.exp}`, cell)
+    }
+    return map
+  }, [surfaceCells])
+
+  const colorForSurfaceCell = (iv: number) => {
+    if (surfaceMaxIV <= surfaceMinIV) return 'rgba(59, 130, 246, 0.28)'
+
+    const ratio = Math.max(0, Math.min(1, (iv - surfaceMinIV) / (surfaceMaxIV - surfaceMinIV)))
+    const hue = 212 - ratio * 164
+    const lightness = 92 - ratio * 42
+    return `hsl(${hue.toFixed(0)} 78% ${lightness.toFixed(0)}%)`
+  }
 
   return (
     <div className="min-h-screen bg-surface">
@@ -265,17 +342,20 @@ export default function AnalysisPage() {
                       strokeWidth={1.5}
                       label={{ value: 'Spot', position: 'top', fontSize: 10 }}
                     />
-                    {/* Bid/Ask spread as faint dots */}
-                    <Line dataKey="bid" name="Bid IV" connectNulls={false} strokeWidth={0}
-                      dot={{ r: 2.5, fill: '#9ca3af', strokeWidth: 0 }} activeDot={{ r: 4 }} />
-                    <Line dataKey="ask" name="Ask IV" connectNulls={false} strokeWidth={0}
-                      dot={{ r: 2.5, fill: '#9ca3af', strokeWidth: 0 }} activeDot={{ r: 4 }} />
-                    {/* Mark IV as solid dots */}
-                    <Line dataKey="mark" name="Mark IV" connectNulls={false} strokeWidth={0}
-                      dot={{ r: 4, fill: '#3b82f6', strokeWidth: 0 }} activeDot={{ r: 5 }} />
                     {/* SVI fitted curve */}
                     <Line dataKey="fitted" name="SVI Fit" connectNulls dot={false}
-                      strokeWidth={2.5} stroke="#8b5cf6" />
+                      strokeWidth={2} stroke="#8b5cf6" isAnimationActive={false} />
+                    {/* Bid/Ask spread as faint dots */}
+                    <Line dataKey="bid" name="Bid IV" connectNulls={false} strokeWidth={0}
+                      dot={{ r: 3, fill: '#d1d5db', stroke: '#9ca3af', strokeWidth: 1 }} activeDot={{ r: 4 }}
+                      isAnimationActive={false} />
+                    <Line dataKey="ask" name="Ask IV" connectNulls={false} strokeWidth={0}
+                      dot={{ r: 3, fill: '#d1d5db', stroke: '#9ca3af', strokeWidth: 1 }} activeDot={{ r: 4 }}
+                      isAnimationActive={false} />
+                    {/* Mark IV as solid dots */}
+                    <Line dataKey="mark" name="Mark IV" connectNulls={false} strokeWidth={0}
+                      dot={{ r: 5, fill: '#3b82f6', stroke: '#fff', strokeWidth: 1.5 }} activeDot={{ r: 6 }}
+                      isAnimationActive={false} />
                   </LineChart>
                 </ResponsiveContainer>
               )}
@@ -313,6 +393,7 @@ export default function AnalysisPage() {
                         stroke="#8b5cf6" strokeWidth={2}
                         dot={{ r: 4, fill: '#8b5cf6', strokeWidth: 0 }}
                         activeDot={{ r: 5 }}
+                        isAnimationActive={false}
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -345,13 +426,115 @@ export default function AnalysisPage() {
                       />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
                       <ReferenceLine y={0} stroke="var(--color-rim, #e5e7eb)" />
-                      <Bar dataKey="rr" name="25Δ RR" fill="#38bdf8" radius={[2, 2, 0, 0]} />
-                      <Bar dataKey="bf" name="25Δ Fly" fill="#34d399" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey="rr" name="25Δ RR" fill="#38bdf8" radius={[2, 2, 0, 0]} isAnimationActive={false} />
+                      <Bar dataKey="bf" name="25Δ Fly" fill="#34d399" radius={[2, 2, 0, 0]} isAnimationActive={false} />
                     </BarChart>
                   </ResponsiveContainer>
                 )}
               </div>
 
+            </div>
+
+            <div className="card">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Raw IV Surface</h2>
+                  <p className="text-xs text-ink-3 mt-0.5">
+                    OTM mark IV bucketed by moneyness in the backend
+                  </p>
+                </div>
+                {activeSurfaceDetails && (
+                  <div className="text-[11px] text-ink-3 text-right">
+                    <div className="font-medium text-ink">
+                      {activeSurfaceDetails.label} · {activeSurfaceDetails.bucketLabel}
+                    </div>
+                    <div>
+                      {activeSurfaceDetails.avgMarkIV.toFixed(1)}% IV · {activeSurfaceDetails.count} contract{activeSurfaceDetails.count === 1 ? '' : 's'}
+                    </div>
+                    <div>
+                      Strikes {activeSurfaceDetails.minStrike.toLocaleString()}-{activeSurfaceDetails.maxStrike.toLocaleString()}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!rawSurface || rawSurface.expiries.length === 0 || rawSurface.buckets.length === 0 || rawSurface.cells.length === 0 ? (
+                <div className="flex items-center justify-center h-56 text-sm text-ink-3">
+                  No raw IV surface data available
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="overflow-x-auto">
+                    <div
+                      className="grid gap-1 min-w-[640px]"
+                      style={{ gridTemplateColumns: `88px repeat(${rawSurface.expiries.length}, minmax(40px, 1fr))` }}
+                    >
+                      <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-ink-3 px-2 py-1">
+                        Mny
+                      </div>
+                      {rawSurface.expiries.map(expiry => (
+                        <div key={expiry.exp} className="px-1 py-1 text-center">
+                          <div className="text-[11px] font-medium text-ink">{expiry.label}</div>
+                          <div className="text-[10px] text-ink-3">{expiry.dte}d</div>
+                        </div>
+                      ))}
+
+                      {rawSurface.buckets.slice().reverse().map(bucket => (
+                        <div
+                          key={`row-${bucket.key}`}
+                          className="contents"
+                        >
+                          <div
+                            className="flex items-center justify-end pr-2 text-[11px] text-ink-3"
+                          >
+                            {bucket.label}
+                          </div>
+                          {rawSurface.expiries.map(expiry => {
+                            const cell = surfaceCellMap.get(`${bucket.key}|${expiry.exp}`) ?? null
+                            return (
+                              <button
+                                key={`${bucket.key}-${expiry.exp}`}
+                                type="button"
+                                onMouseEnter={() => cell && setActiveSurfaceCell(cell)}
+                                onFocus={() => cell && setActiveSurfaceCell(cell)}
+                                className="h-8 rounded border transition-colors"
+                                style={{
+                                  backgroundColor: cell ? colorForSurfaceCell(cell.avgMarkIV) : 'rgba(148, 163, 184, 0.08)',
+                                  borderColor: cell ? 'rgba(255, 255, 255, 0.18)' : 'rgba(148, 163, 184, 0.12)',
+                                }}
+                                aria-label={cell
+                                  ? `${expiry.label} ${bucket.label} ${cell.avgMarkIV.toFixed(1)} percent implied volatility`
+                                  : `${expiry.label} ${bucket.label} no data`}
+                                title={cell
+                                  ? `${expiry.label} · ${bucket.label} · ${cell.avgMarkIV.toFixed(1)}% IV · ${cell.count} contract${cell.count === 1 ? '' : 's'}`
+                                  : `${expiry.label} · ${bucket.label} · no data`}
+                              >
+                                <span className="sr-only">
+                                  {cell ? `${cell.avgMarkIV.toFixed(1)}% IV` : 'No data'}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3 text-[11px] text-ink-3">
+                    <div>
+                      Hover a cell to inspect expiry, moneyness, IV, and strike range.
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span>{surfaceMinIV.toFixed(1)}%</span>
+                      <div
+                        className="h-2 w-28 rounded-full"
+                        style={{ background: 'linear-gradient(90deg, hsl(212 78% 92%), hsl(48 78% 72%), hsl(18 78% 50%))' }}
+                      />
+                      <span>{surfaceMaxIV.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </>
         )}

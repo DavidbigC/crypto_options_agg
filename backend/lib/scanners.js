@@ -9,11 +9,27 @@ function calcBreakEven(theta, gamma) {
   return Math.sqrt(2 * Math.abs(theta) / gamma)
 }
 
-function getAsk(contract) {
+function getAsk(contract, activeExchanges) {
+  if (activeExchanges && contract.prices) {
+    let best = 0
+    for (const ex of activeExchanges) {
+      const v = contract.prices[ex]?.ask || 0
+      if (v > 0 && (best === 0 || v < best)) best = v
+    }
+    return best
+  }
   return (contract.bestAsk ?? contract.ask) || 0
 }
 
-function getBid(contract) {
+function getBid(contract, activeExchanges) {
+  if (activeExchanges && contract.prices) {
+    let best = 0
+    for (const ex of activeExchanges) {
+      const v = contract.prices[ex]?.bid || 0
+      if (v > best) best = v
+    }
+    return best
+  }
   return (contract.bestBid ?? contract.bid) || 0
 }
 
@@ -41,7 +57,7 @@ function futureExpirations(expirations) {
  *   { expiry, dte, type, callStrike, putStrike,
  *     askCost, bidCost, gamma, theta, be, bePct }
  */
-export function computeGammaRows(optionsData, spotPrice) {
+export function computeGammaRows(optionsData, spotPrice, activeExchanges) {
   if (!optionsData || !spotPrice) return []
   const expirations = futureExpirations(optionsData.expirations || [])
   const results = []
@@ -66,10 +82,10 @@ export function computeGammaRows(optionsData, spotPrice) {
     const atmCall = chain.calls.find(c => c.strike === atm)
     const atmPut  = chain.puts.find(p => p.strike === atm)
     if (atmCall && atmPut) {
-      const callAsk = getAsk(atmCall)
-      const putAsk  = getAsk(atmPut)
-      const callBid = getBid(atmCall)
-      const putBid  = getBid(atmPut)
+      const callAsk = getAsk(atmCall, activeExchanges)
+      const putAsk  = getAsk(atmPut, activeExchanges)
+      const callBid = getBid(atmCall, activeExchanges)
+      const putBid  = getBid(atmPut, activeExchanges)
       if (callAsk && putAsk) {
         const gamma = (atmCall.gamma || 0) + (atmPut.gamma || 0)
         const theta = (atmCall.theta || 0) + (atmPut.theta || 0)
@@ -104,12 +120,12 @@ export function computeGammaRows(optionsData, spotPrice) {
         const be    = calcBreakEven(theta, gamma)
         if (!be) continue
 
-        const callAsk = getAsk(call)
-        const putAsk  = getAsk(put)
+        const callAsk = getAsk(call, activeExchanges)
+        const putAsk  = getAsk(put, activeExchanges)
         if (!callAsk || !putAsk) continue
 
-        const callBid = getBid(call)
-        const putBid  = getBid(put)
+        const callBid = getBid(call, activeExchanges)
+        const putBid  = getBid(put, activeExchanges)
         const candidate = {
           expiry, dte, type: 'strangle',
           callStrike: call.strike, putStrike: put.strike,
@@ -147,7 +163,7 @@ export function computeGammaRows(optionsData, spotPrice) {
  *   { expiry, dte, type, callStrike, putStrike,
  *     askCost, bidCost, vega, theta, markIV, vegaPerDollar, beIVMove }
  */
-export function computeVegaRows(optionsData, spotPrice) {
+export function computeVegaRows(optionsData, spotPrice, activeExchanges) {
   if (!optionsData || !spotPrice) return []
   const expirations = futureExpirations(optionsData.expirations || [])
   const results = []
@@ -191,10 +207,10 @@ export function computeVegaRows(optionsData, spotPrice) {
     const atmCall = chain.calls.find(c => c.strike === atm)
     const atmPut  = chain.puts.find(p => p.strike === atm)
     if (atmCall && atmPut) {
-      const callAsk = getAsk(atmCall)
-      const putAsk  = getAsk(atmPut)
+      const callAsk = getAsk(atmCall, activeExchanges)
+      const putAsk  = getAsk(atmPut, activeExchanges)
       if (callAsk && putAsk) {
-        const row = makeVegaRow('straddle', atmCall, atmPut, callAsk, putAsk, getBid(atmCall), getBid(atmPut))
+        const row = makeVegaRow('straddle', atmCall, atmPut, callAsk, putAsk, getBid(atmCall, activeExchanges), getBid(atmPut, activeExchanges))
         if (row) results.push(row)
       }
     }
@@ -211,10 +227,10 @@ export function computeVegaRows(optionsData, spotPrice) {
     for (const call of otmCalls) {
       for (const put of otmPuts) {
         if (hasDelta && Math.abs((call.delta || 0) + (put.delta || 0)) > DELTA_TOL) continue
-        const callAsk = getAsk(call)
-        const putAsk  = getAsk(put)
+        const callAsk = getAsk(call, activeExchanges)
+        const putAsk  = getAsk(put, activeExchanges)
         if (!callAsk || !putAsk) continue
-        const row = makeVegaRow('strangle', call, put, callAsk, putAsk, getBid(call), getBid(put))
+        const row = makeVegaRow('strangle', call, put, callAsk, putAsk, getBid(call, activeExchanges), getBid(put, activeExchanges))
         if (!row) continue
 
         if (!bestLong  || row.vegaPerDollar > bestLong.vegaPerDollar)  bestLong  = row
@@ -245,5 +261,6 @@ export function updateScannerCache(cacheKey, response, spotPrice) {
     gamma: computeGammaRows(response, spotPrice),
     vega:  computeVegaRows(response, spotPrice),
     updatedAt: Date.now(),
+    _raw: { optionsData: response, spotPrice },
   }
 }

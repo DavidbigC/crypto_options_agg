@@ -38,6 +38,8 @@ interface StrategyRow {
   be: number
   bePct: number
   beToEvent: number | null
+  gammaDollar: number   // gamma / cost
+  gammaTheta: number    // gamma / |theta|
 }
 
 function getBestAsk(contract: any, activeExchanges?: Set<string>): number {
@@ -64,16 +66,24 @@ function getBestBid(contract: any, activeExchanges?: Set<string>): number {
   return (contract.bestBid ?? contract.bid) || 0
 }
 
+type SortCol = 'type' | 'expiry' | 'dte' | 'callStrike' | 'cost' | 'gamma' | 'theta' | 'be' | 'bePct' | 'gammaDollar' | 'gammaTheta' | 'beToEvent'
+
 export default function GammaScanner({ optionsData, spotPrice, coin, exchange, activeExchanges }: GammaScannerProps) {
   const [eventDate, setEventDate] = useState('')
   const [direction, setDirection] = useState<'long' | 'short'>('long')
   const [rawRows, setRawRows] = useState<GammaRow[]>([])
+  const [sortCol, setSortCol] = useState<SortCol | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  const exchangesParam = exchange === 'combined' && activeExchanges
+    ? `?exchanges=${Array.from(activeExchanges).join(',')}`
+    : ''
 
   useEffect(() => {
     setRawRows([])
     let cancelled = false
     const fetchRows = () => {
-      fetch(`/api/scanners/${exchange}/${coin}`)
+      fetch(`/api/scanners/${exchange}/${coin}${exchangesParam}`)
         .then(r => r.json())
         .then(data => {
           if (!cancelled) setRawRows(data.gamma ?? [])
@@ -86,7 +96,7 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
       cancelled = true
       clearInterval(id)
     }
-  }, [exchange, coin])
+  }, [exchange, coin, exchangesParam])
 
   const daysToEvent = useMemo(() => {
     if (!eventDate) return null
@@ -95,16 +105,30 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
   }, [eventDate])
 
   const rows = useMemo<StrategyRow[]>(() => {
-    return rawRows
+    const eventTs = eventDate ? new Date(eventDate + 'T08:00:00Z').getTime() : null
+    const filtered = eventTs != null
+      ? rawRows.filter(row => new Date(row.expiry + 'T08:00:00Z').getTime() >= eventTs)
+      : rawRows
+    return filtered
       .map(row => {
         const cost = direction === 'long' ? row.askCost : row.bidCost
         const beToEvent =
           daysToEvent && row.gamma > 0
             ? Math.sqrt(2 * daysToEvent * Math.abs(row.theta) / row.gamma)
             : null
-        return { ...row, cost, beToEvent }
+        const gammaDollar = cost > 0 ? row.gamma / cost : 0
+        const gammaTheta  = row.theta !== 0 ? row.gamma / Math.abs(row.theta) : 0
+        return { ...row, cost, beToEvent, gammaDollar, gammaTheta }
       })
       .sort((a, b) => {
+        if (sortCol) {
+          let diff: number
+          if (sortCol === 'type')   diff = a.type.localeCompare(b.type)
+          else if (sortCol === 'expiry') diff = a.expiry.localeCompare(b.expiry)
+          else if (sortCol === 'beToEvent') diff = (a.beToEvent ?? Infinity) - (b.beToEvent ?? Infinity)
+          else diff = (a[sortCol] as number) - (b[sortCol] as number)
+          return sortDir === 'desc' ? -diff : diff
+        }
         if (daysToEvent != null) {
           return direction === 'short'
             ? (b.beToEvent ?? 0) - (a.beToEvent ?? 0)
@@ -112,7 +136,12 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
         }
         return direction === 'short' ? b.be - a.be : a.be - b.be
       })
-  }, [rawRows, direction, daysToEvent])
+  }, [rawRows, direction, daysToEvent, eventDate, sortCol, sortDir])
+
+  const handleSortCol = (col: SortCol) => {
+    if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    else { setSortCol(col); setSortDir('desc') }
+  }
 
   const handleLoad = (row: StrategyRow) => {
     const chain = optionsData!.data[row.expiry]
@@ -175,6 +204,10 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
 
   const isShort = direction === 'short'
   const accentColor = isShort ? 'rose' : 'violet'
+
+  const ind = (col: SortCol) => sortCol === col ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
+  const thCls = (align: 'left' | 'right', extra = '') =>
+    `py-1 text-${align} font-medium cursor-pointer select-none hover:text-ink ${extra}`
   const worstBe = rows.reduce((m, r) => Math.max(m, r.be), 0) || 1
   const worstBeToEvent = daysToEvent
     ? rows.reduce((m, r) => Math.max(m, r.beToEvent ?? 0), 0) || 1
@@ -223,19 +256,19 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
         <table className="w-full text-xs tabular-nums">
           <thead>
             <tr className="border-b border-rim text-ink-2 text-[11px]">
-              <th className="py-1 text-left font-medium">Type</th>
-              <th className="py-1 text-left font-medium">Expiry</th>
-              <th className="py-1 text-right font-medium">DTE</th>
-              <th className="py-1 text-right font-medium">Strike(s)</th>
-              <th className="py-1 text-right font-medium">{isShort ? 'Premium' : 'Cost'}</th>
-              <th className="py-1 text-right font-medium">Γ</th>
-              <th className="py-1 text-right font-medium">Θ/day</th>
-              <th className={`py-1 text-right font-medium text-${accentColor}-600 dark:text-${accentColor}-400`}>BE/day</th>
-              <th className={`py-1 text-right font-medium text-${accentColor}-600 dark:text-${accentColor}-400`}>BE%</th>
+              <th className={thCls('left')} onClick={() => handleSortCol('type')}>Type{ind('type')}</th>
+              <th className={thCls('left')} onClick={() => handleSortCol('expiry')}>Expiry{ind('expiry')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('dte')}>DTE{ind('dte')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('callStrike')}>Strike(s){ind('callStrike')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('cost')}>{isShort ? 'Premium' : 'Cost'}{ind('cost')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('gamma')}>Γ{ind('gamma')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('theta')}>Θ/day{ind('theta')}</th>
+              <th className={thCls('right', `text-${accentColor}-600 dark:text-${accentColor}-400`)} onClick={() => handleSortCol('be')}>BE/day{ind('be')}</th>
+              <th className={thCls('right', `text-${accentColor}-600 dark:text-${accentColor}-400`)} onClick={() => handleSortCol('bePct')}>BE%{ind('bePct')}</th>
+              <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('gammaDollar')} title="Gamma per dollar spent. Higher = more gamma per $ — better for longs, worse for shorts.">Γ/${ind('gammaDollar')}</th>
+              <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('gammaTheta')} title="Gamma per dollar of daily theta. Higher = more gamma per unit of carry — better for longs, worse for shorts.">Γ/Θ{ind('gammaTheta')}</th>
               {daysToEvent && (
-                <th className="py-1 text-right font-medium text-amber-600 dark:text-amber-400">
-                  BE→{fmtExpiry(eventDate)}
-                </th>
+                <th className={thCls('right', 'text-amber-600 dark:text-amber-400')} onClick={() => handleSortCol('beToEvent')}>BE→{fmtExpiry(eventDate)}{ind('beToEvent')}</th>
               )}
               <th className="py-1 w-16" />
             </tr>
@@ -250,7 +283,7 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
                 : 0
               return (
                 <tr
-                  key={`${row.expiry}-${row.type}`}
+                  key={`${row.expiry}-${row.type}-${row.callStrike}-${row.putStrike}`}
                   className={classNames('border-b border-rim hover:bg-muted cursor-pointer', {
                     'bg-violet-50 dark:bg-violet-950/20': isBest && !isShort && !daysToEvent,
                     'bg-rose-50 dark:bg-rose-950/20':   isBest && isShort && !daysToEvent,
@@ -294,6 +327,12 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
                     'text-ink-2': (!isBest) || !!daysToEvent,
                   })}>
                     {row.bePct.toFixed(2)}%
+                  </td>
+                  <td className="py-1.5 text-right font-mono text-ink-3" title="Gamma per dollar spent">
+                    {row.gammaDollar.toExponential(2)}
+                  </td>
+                  <td className="py-1.5 text-right font-mono text-ink-3" title="Gamma per dollar of daily theta">
+                    {row.gammaTheta.toExponential(2)}
                   </td>
                   {daysToEvent && (
                     <td className={classNames('py-1.5 text-right font-semibold font-mono', {

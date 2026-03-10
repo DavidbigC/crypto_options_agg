@@ -4,6 +4,8 @@ import { useState, useRef, useEffect } from 'react'
 import classNames from 'classnames'
 import { Exchange, Leg, OptionsData, OptionContract, CombinedOptionContract, CONTRACT_SIZES } from '@/types/options'
 import GreekTh from '@/components/GreekTh'
+import { EX_BADGE, EX_LABEL as EX_LABEL_MAP } from '@/lib/exchangeColors'
+import { filterExpirations } from '@/lib/filterExpirations'
 
 interface MiniChainProps {
   exchange: Exchange
@@ -15,16 +17,15 @@ interface MiniChainProps {
 }
 
 const COINS = ['BTC', 'ETH', 'SOL'] as const
+type ExchangeKey = 'bybit' | 'okx' | 'deribit'
+const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit']
+const EX_COLOR: Record<ExchangeKey, string> = EX_BADGE as Record<ExchangeKey, string>
+const EX_LABEL: Record<ExchangeKey, string> = EX_LABEL_MAP as Record<ExchangeKey, string>
 
 function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | null | undefined }) {
-  if (!ex) return null
   return (
-    <span className={classNames('ml-0.5 px-1 rounded text-white text-[8px] font-bold', {
-      'bg-orange-500': ex === 'bybit',
-      'bg-zinc-700':   ex === 'okx',
-      'bg-blue-600':   ex === 'deribit',
-    })}>
-      {ex === 'bybit' ? 'B' : ex === 'okx' ? 'O' : 'D'}
+    <span className={classNames('inline-block mx-0.5 w-[14px] text-center rounded text-[8px] font-bold', ex ? EX_BADGE[ex] : 'invisible')}>
+      {ex === 'bybit' ? 'B' : ex === 'okx' ? 'O' : ex === 'deribit' ? 'D' : 'B'}
     </span>
   )
 }
@@ -32,9 +33,23 @@ function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | null | undefined })
 export default function MiniChain({ exchange, coin, onCoinChange, optionsData, spotPrice, onAddLeg }: MiniChainProps) {
   const [selectedExpiry, setSelectedExpiry] = useState<string>('')
   const [showAll, setShowAll] = useState(false)
+  const [activeExchanges, setActiveExchanges] = useState<Set<ExchangeKey>>(new Set(ALL_EXCHANGES))
   const atmRowRef = useRef<HTMLTableRowElement>(null)
 
-  const expirations = optionsData?.expirations ?? []
+  const toggleExchange = (ex: ExchangeKey) => {
+    setActiveExchanges(prev => {
+      const next = new Set(prev)
+      if (next.has(ex)) {
+        if (next.size === 1) return prev
+        next.delete(ex)
+      } else {
+        next.add(ex)
+      }
+      return next
+    })
+  }
+
+  const expirations = filterExpirations(optionsData?.expirations ?? [])
   const expiry = selectedExpiry || expirations[0] || ''
   const chainData = optionsData?.data[expiry]
 
@@ -64,8 +79,23 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
     atmRowRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
   }, [expiry, atmStrike])
 
-  const getBid = (c: AnyContract) => isCombined ? (c.bestBid ?? 0) : c.bid
-  const getAsk = (c: AnyContract) => isCombined ? (c.bestAsk ?? 0) : c.ask
+  const bestFiltered = (c: AnyContract, side: 'buy' | 'sell'): { val: number; ex: ExchangeKey | null } => {
+    if (!isCombined || !c.prices) return { val: side === 'buy' ? (c.ask ?? 0) : (c.bid ?? 0), ex: null }
+    let bestVal = 0
+    let bestEx: ExchangeKey | null = null
+    for (const ex of Array.from(activeExchanges)) {
+      const prices = c.prices[ex]
+      if (!prices) continue
+      const raw = side === 'buy' ? prices.ask : prices.bid
+      if (!raw || raw === 0) continue
+      if (side === 'sell' && raw > bestVal) { bestVal = raw; bestEx = ex }
+      if (side === 'buy'  && (bestVal === 0 || raw < bestVal)) { bestVal = raw; bestEx = ex }
+    }
+    return { val: bestVal, ex: bestEx }
+  }
+
+  const getBid = (c: AnyContract) => isCombined ? bestFiltered(c, 'sell').val : c.bid
+  const getAsk = (c: AnyContract) => isCombined ? bestFiltered(c, 'buy').val  : c.ask
 
   const toUSD = (price: number) => {
     if (price === 0) return 0
@@ -87,11 +117,30 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
   const isCallITM = (strike: number) => strike < spotPrice
   const isPutITM  = (strike: number) => strike > spotPrice
 
+  const daysToExpiry = expiry
+    ? Math.max(0, (new Date(expiry + 'T08:00:00Z').getTime() - Date.now()) / 86_400_000)
+    : 0
+
+  const fmtAPR = (bidRaw: number, collateral: number): string => {
+    if (!bidRaw || bidRaw <= 0 || daysToExpiry <= 0 || collateral <= 0) return '--'
+    const bidUSD = toUSD(bidRaw)
+    return ((bidUSD / collateral) * (365 / daysToExpiry) * 100).toFixed(1) + '%'
+  }
+
   const makeLeg = (contract: AnyContract, side: 'buy' | 'sell', type: 'call' | 'put', legExchange?: Exchange): Omit<Leg, 'id'> => {
-    const cs = CONTRACT_SIZES[legExchange ?? exchange]?.[coin] ?? 1
-    const rawPrice = side === 'buy' ? getAsk(contract) : getBid(contract)
+    const filtered = isCombined ? bestFiltered(contract, side) : null
+    const resolvedExchange = (filtered?.ex ?? legExchange ?? exchange) as Exchange
+    // contractSize reflects actual exchange contract size (e.g. OKX BTC = 0.1 BTC per contract)
+    // entryPrice is always the per-BTC-underlying USD price (matching chain display)
+    // P&L cost must then multiply entryPrice * contractSize (done in PnLChart)
+    const cs = CONTRACT_SIZES[resolvedExchange]?.[coin] ?? 1
+    const rawPrice = filtered ? filtered.val : (side === 'buy' ? getAsk(contract) : getBid(contract))
+    // For non-combined OKX, prices are in BTC — convert to USD
+    const priceUSD = (!isCombined && resolvedExchange === 'okx' && spotPrice > 0)
+      ? rawPrice * spotPrice
+      : rawPrice
     return {
-      exchange: legExchange ?? exchange,
+      exchange: resolvedExchange,
       coin,
       symbol: contract.symbol ?? '',
       expiry,
@@ -99,7 +148,7 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
       type,
       side,
       qty: 1,
-      entryPrice: rawPrice * cs,
+      entryPrice: priceUSD,
       markVol: contract.markVol || contract.impliedVolatility || 0.5,
       contractSize: cs,
       enabled: true,
@@ -113,6 +162,22 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-ink">Options Chain</h2>
           <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-muted text-ink-2 uppercase">{exchange}</span>
+          {isCombined && (
+            <div className="flex items-center gap-0.5">
+              {ALL_EXCHANGES.map(ex => (
+                <button
+                  key={ex}
+                  onClick={() => toggleExchange(ex)}
+                  className={classNames('px-1 py-0.5 rounded text-[9px] font-bold transition-opacity', EX_COLOR[ex], {
+                    'text-white opacity-100': activeExchanges.has(ex),
+                    'opacity-25': !activeExchanges.has(ex),
+                  })}
+                >
+                  {EX_LABEL[ex]}
+                </button>
+              ))}
+            </div>
+          )}
           {allStrikes.length > 0 && (
             <button
               onClick={() => setShowAll(v => !v)}
@@ -152,26 +217,60 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
         <div className="text-xs text-ink-3 text-center py-8">Loading…</div>
       ) : (
         <div className="overflow-y-auto max-h-[420px]">
-          <table className="w-full text-[11px]">
+          <table className="w-full text-[11px] table-fixed">
+            <colgroup>
+              {/* CALLS: ITM V Θ Γ Δ bIV mIV aIV Bid APR Ask */}
+              <col className="w-8" />
+              <col className="w-10" />
+              <col className="w-14" />
+              <col className="w-16" />
+              <col className="w-10" />
+              <col className="w-[42px]" />
+              <col className="w-[42px]" />
+              <col className="w-[42px]" />
+              <col className="w-[72px]" />
+              <col className="w-[48px]" />
+              <col className="w-[72px]" />
+              {/* Strike */}
+              <col className="w-16" />
+              {/* PUTS: Ask Bid APR aIV mIV bIV Δ Γ Θ V ITM */}
+              <col className="w-[72px]" />
+              <col className="w-[72px]" />
+              <col className="w-[48px]" />
+              <col className="w-[42px]" />
+              <col className="w-[42px]" />
+              <col className="w-[42px]" />
+              <col className="w-10" />
+              <col className="w-16" />
+              <col className="w-14" />
+              <col className="w-10" />
+              <col className="w-8" />
+            </colgroup>
             <thead className="sticky top-0 bg-card z-10">
               <tr className="border-b border-rim text-[9px] text-ink-3">
-                <th colSpan={8} className="text-center pb-0.5 text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20">CALLS</th>
+                <th colSpan={11} className="text-center pb-0.5 text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/20">CALLS</th>
                 <th />
-                <th colSpan={8} className="text-center pb-0.5 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20">PUTS</th>
+                <th colSpan={11} className="text-center pb-0.5 text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20">PUTS</th>
               </tr>
               <tr className="border-b border-rim text-ink-2 text-[10px]">
                 <th className="py-1 text-right pr-1 font-medium">ITM</th>
-                <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" className="py-1 pr-1" />
-                <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" className="py-1 pr-1" />
-                <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" className="py-1 pr-1" />
-                <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" className="py-1 pr-1" />
-                <th className="py-1 text-right pr-1 font-medium">{isCombined ? 'IV' : 'IV%'}</th>
+                <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" className="py-1 pr-1 text-right" />
+                <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" className="py-1 pr-1 text-right" />
+                <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" className="py-1 pr-1 text-right" />
+                <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" className="py-1 pr-1 text-right" />
+                <th className="py-1 text-right pr-1 font-medium text-ink-3">bIV</th>
+                <th className="py-1 text-right pr-1 font-medium text-ink-3">mIV</th>
+                <th className="py-1 text-right pr-1 font-medium text-ink-3">aIV</th>
                 <th className="py-1 text-right pr-1 font-medium">Bid</th>
+                <th className="py-1 text-right pr-1 font-medium text-amber-600 dark:text-amber-400">APR</th>
                 <th className="py-1 text-right pr-2 font-medium">Ask</th>
                 <th className="py-1 text-center font-semibold text-ink">Strike</th>
                 <th className="py-1 text-left pl-2 font-medium">Ask</th>
                 <th className="py-1 text-left font-medium">Bid</th>
-                <th className="py-1 text-left font-medium">{isCombined ? 'IV' : 'IV%'}</th>
+                <th className="py-1 text-left font-medium text-amber-600 dark:text-amber-400">APR</th>
+                <th className="py-1 text-left font-medium text-ink-3">aIV</th>
+                <th className="py-1 text-left font-medium text-ink-3">mIV</th>
+                <th className="py-1 text-left font-medium text-ink-3">bIV</th>
                 <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" align="left" className="py-1 text-left" />
                 <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" align="left" className="py-1 text-left" />
                 <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" align="left" className="py-1 text-left" />
@@ -184,10 +283,14 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
                 const call = callsMap.get(strike)
                 const put  = putsMap.get(strike)
                 const isATM = strike === atmStrike
-                const callBid = call ? getBid(call) : 0
-                const callAsk = call ? getAsk(call) : 0
-                const putBid  = put  ? getBid(put)  : 0
-                const putAsk  = put  ? getAsk(put)  : 0
+                const callBidF = call ? bestFiltered(call, 'sell') : { val: 0, ex: null }
+                const callAskF = call ? bestFiltered(call, 'buy')  : { val: 0, ex: null }
+                const putBidF  = put  ? bestFiltered(put,  'sell') : { val: 0, ex: null }
+                const putAskF  = put  ? bestFiltered(put,  'buy')  : { val: 0, ex: null }
+                const callBid = callBidF.val
+                const callAsk = callAskF.val
+                const putBid  = putBidF.val
+                const putAsk  = putAskF.val
                 return (
                   <tr
                     key={strike}
@@ -205,30 +308,36 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
                     <td className="py-0.5 pr-1 text-right text-ink-3">{fmtTheta(call?.theta)}</td>
                     <td className="py-0.5 pr-1 text-right text-ink-3">{fmtGamma(call?.gamma)}</td>
                     <td className="py-0.5 pr-1 text-right text-ink-2">{fmtDelta(call?.delta)}</td>
-                    <td className="py-0.5 pr-1 text-right text-ink-3">
-                      {!isCombined ? fmtVol(call?.markVol || call?.impliedVolatility) : '--'}
-                    </td>
+                    <td className="py-0.5 pr-1 text-right text-ink-3">{fmtVol(call?.bidVol)}</td>
+                    <td className="py-0.5 pr-1 text-right text-ink-3">{fmtVol(call?.markVol || call?.impliedVolatility)}</td>
+                    <td className="py-0.5 pr-1 text-right text-ink-3">{fmtVol(call?.askVol)}</td>
                     {/* Call Bid (sell) */}
                     <td className="py-0.5 pr-1 text-right">
                       {call && callBid > 0 ? (
                         <button
-                          onClick={() => onAddLeg(makeLeg(call, 'sell', 'call', isCombined ? call.bestBidEx ?? undefined : undefined))}
+                          onClick={() => onAddLeg(makeLeg(call, 'sell', 'call'))}
                           className="text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 px-1 rounded inline-flex items-center"
                         >
                           {fmtUSD(callBid)}
-                          {isCombined && <ExBadge ex={call.bestBidEx} />}
+                          {isCombined && <ExBadge ex={callBidF.ex} />}
                         </button>
                       ) : <span className="text-ink-3 px-1">--</span>}
+                    </td>
+                    {/* Call APR */}
+                    <td className={classNames('py-0.5 pr-1 text-right text-amber-600 dark:text-amber-400 font-mono text-[10px]', {
+                      'opacity-30': isCallITM(strike),
+                    })}>
+                      {fmtAPR(callBid, spotPrice)}
                     </td>
                     {/* Call Ask (buy) */}
                     <td className="py-0.5 pr-2 text-right">
                       {call && callAsk > 0 ? (
                         <button
-                          onClick={() => onAddLeg(makeLeg(call, 'buy', 'call', isCombined ? call.bestAskEx ?? undefined : undefined))}
+                          onClick={() => onAddLeg(makeLeg(call, 'buy', 'call'))}
                           className="text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 px-1 rounded font-medium inline-flex items-center"
                         >
                           {fmtUSD(callAsk)}
-                          {isCombined && <ExBadge ex={call.bestAskEx} />}
+                          {isCombined && <ExBadge ex={callAskF.ex} />}
                         </button>
                       ) : <span className="text-ink-3 px-1">--</span>}
                     </td>
@@ -244,11 +353,11 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
                     <td className="py-0.5 pl-2 text-left">
                       {put && putAsk > 0 ? (
                         <button
-                          onClick={() => onAddLeg(makeLeg(put, 'buy', 'put', isCombined ? put.bestAskEx ?? undefined : undefined))}
+                          onClick={() => onAddLeg(makeLeg(put, 'buy', 'put'))}
                           className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-1 rounded font-medium inline-flex items-center"
                         >
+                          {isCombined && <ExBadge ex={putAskF.ex} />}
                           {fmtUSD(putAsk)}
-                          {isCombined && <ExBadge ex={put.bestAskEx} />}
                         </button>
                       ) : <span className="text-ink-3 px-1">--</span>}
                     </td>
@@ -256,17 +365,23 @@ export default function MiniChain({ exchange, coin, onCoinChange, optionsData, s
                     <td className="py-0.5 text-left">
                       {put && putBid > 0 ? (
                         <button
-                          onClick={() => onAddLeg(makeLeg(put, 'sell', 'put', isCombined ? put.bestBidEx ?? undefined : undefined))}
+                          onClick={() => onAddLeg(makeLeg(put, 'sell', 'put'))}
                           className="text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 px-1 rounded inline-flex items-center"
                         >
+                          {isCombined && <ExBadge ex={putBidF.ex} />}
                           {fmtUSD(putBid)}
-                          {isCombined && <ExBadge ex={put.bestBidEx} />}
                         </button>
                       ) : <span className="text-ink-3 px-1">--</span>}
                     </td>
-                    <td className="py-0.5 text-left text-ink-3">
-                      {!isCombined ? fmtVol(put?.markVol || put?.impliedVolatility) : '--'}
+                    {/* Put APR */}
+                    <td className={classNames('py-0.5 text-left text-amber-600 dark:text-amber-400 font-mono text-[10px]', {
+                      'opacity-30': isPutITM(strike),
+                    })}>
+                      {fmtAPR(putBid, strike)}
                     </td>
+                    <td className="py-0.5 text-left text-ink-3">{fmtVol(put?.askVol)}</td>
+                    <td className="py-0.5 text-left text-ink-3">{fmtVol(put?.markVol || put?.impliedVolatility)}</td>
+                    <td className="py-0.5 text-left text-ink-3">{fmtVol(put?.bidVol)}</td>
                     <td className="py-0.5 text-left text-ink-2">{fmtDelta(put?.delta)}</td>
                     <td className="py-0.5 text-left text-ink-3">{fmtGamma(put?.gamma)}</td>
                     <td className="py-0.5 text-left text-ink-3">{fmtTheta(put?.theta)}</td>

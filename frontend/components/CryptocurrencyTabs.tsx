@@ -36,11 +36,6 @@ export default function CryptocurrencyTabs({ selected, onSelect, spotPrice, exch
             )}
           >
             <span>{crypto}</span>
-            {isSelected && spotPrice > 0 && (
-              <span className="font-mono text-xs text-ink-2">
-                ${spotPrice.toLocaleString()}
-              </span>
-            )}
           </button>
         )
       })}

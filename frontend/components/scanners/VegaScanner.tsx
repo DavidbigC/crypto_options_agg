@@ -39,6 +39,7 @@ interface StrategyRow {
   markIV: number         // average mark IV of the two legs
   vegaPerDollar: number  // vega / cost — higher is better for longs
   beIVMove: number       // cost / vega — vol points needed to break even
+  vegaTheta: number      // vega / |theta| — vega per dollar of daily decay
   thetaToEvent: number | null
 }
 
@@ -66,16 +67,24 @@ function getBestBid(contract: any, activeExchanges?: Set<string>): number {
   return (contract.bestBid ?? contract.bid) || 0
 }
 
+type SortCol = 'type' | 'expiry' | 'dte' | 'callStrike' | 'cost' | 'vega' | 'theta' | 'markIV' | 'vegaPerDollar' | 'vegaTheta' | 'beIVMove' | 'thetaToEvent'
+
 export default function VegaScanner({ optionsData, spotPrice, coin, exchange, activeExchanges }: VegaScannerProps) {
   const [eventDate, setEventDate] = useState('')
   const [direction, setDirection] = useState<'long' | 'short'>('long')
   const [rawRows, setRawRows] = useState<VegaRow[]>([])
+  const [sortCol, setSortCol] = useState<SortCol | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+
+  const exchangesParam = exchange === 'combined' && activeExchanges
+    ? `?exchanges=${Array.from(activeExchanges).join(',')}`
+    : ''
 
   useEffect(() => {
     setRawRows([])
     let cancelled = false
     const fetchRows = () => {
-      fetch(`/api/scanners/${exchange}/${coin}`)
+      fetch(`/api/scanners/${exchange}/${coin}${exchangesParam}`)
         .then(r => r.json())
         .then(data => {
           if (!cancelled) setRawRows(data.vega ?? [])
@@ -88,7 +97,7 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
       cancelled = true
       clearInterval(id)
     }
-  }, [exchange, coin])
+  }, [exchange, coin, exchangesParam])
 
   const daysToEvent = useMemo(() => {
     if (!eventDate) return null
@@ -97,13 +106,26 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
   }, [eventDate])
 
   const rows = useMemo<StrategyRow[]>(() => {
-    return rawRows
+    const eventTs = eventDate ? new Date(eventDate + 'T08:00:00Z').getTime() : null
+    const filtered = eventTs != null
+      ? rawRows.filter(row => new Date(row.expiry + 'T08:00:00Z').getTime() >= eventTs)
+      : rawRows
+    return filtered
       .map(row => {
         const cost = direction === 'long' ? row.askCost : row.bidCost
         const thetaToEvent = daysToEvent != null ? Math.abs(row.theta) * daysToEvent : null
-        return { ...row, cost, thetaToEvent }
+        const vegaTheta = row.theta !== 0 ? row.vega / Math.abs(row.theta) : 0
+        return { ...row, cost, thetaToEvent, vegaTheta }
       })
       .sort((a, b) => {
+        if (sortCol) {
+          let diff: number
+          if (sortCol === 'type')   diff = a.type.localeCompare(b.type)
+          else if (sortCol === 'expiry') diff = a.expiry.localeCompare(b.expiry)
+          else if (sortCol === 'thetaToEvent') diff = (a.thetaToEvent ?? Infinity) - (b.thetaToEvent ?? Infinity)
+          else diff = (a[sortCol] as number) - (b[sortCol] as number)
+          return sortDir === 'desc' ? -diff : diff
+        }
         if (daysToEvent != null) {
           const aV = a.vega > 0 ? (a.thetaToEvent ?? 0) / a.vega : 0
           const bV = b.vega > 0 ? (b.thetaToEvent ?? 0) / b.vega : 0
@@ -111,7 +133,12 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
         }
         return direction === 'short' ? b.beIVMove - a.beIVMove : a.beIVMove - b.beIVMove
       })
-  }, [rawRows, direction, daysToEvent])
+  }, [rawRows, direction, daysToEvent, eventDate, sortCol, sortDir])
+
+  const handleSortCol = (col: SortCol) => {
+    if (sortCol === col) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    else { setSortCol(col); setSortDir('desc') }
+  }
 
   const handleLoad = (row: StrategyRow) => {
     const chain = optionsData!.data[row.expiry]
@@ -173,6 +200,11 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
   }
 
   const isShort = direction === 'short'
+
+  const ind = (col: SortCol) => sortCol === col ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
+  const thCls = (align: 'left' | 'right', extra = '') =>
+    `py-1 text-${align} font-medium cursor-pointer select-none hover:text-ink ${extra}`
+
   const worstBeIV = rows.reduce((m, r) => Math.max(m, r.beIVMove), 0) || 1
   const worstThetaPerVega = daysToEvent
     ? rows.reduce((m, r) => Math.max(m, (r.thetaToEvent ?? 0) / r.vega), 0) || 1
@@ -221,20 +253,19 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
         <table className="w-full text-xs tabular-nums">
           <thead>
             <tr className="border-b border-rim text-ink-2 text-[11px]">
-              <th className="py-1 text-left font-medium">Type</th>
-              <th className="py-1 text-left font-medium">Expiry</th>
-              <th className="py-1 text-right font-medium">DTE</th>
-              <th className="py-1 text-right font-medium">Strike(s)</th>
-              <th className="py-1 text-right font-medium">{isShort ? 'Premium' : 'Cost'}</th>
-              <th className="py-1 text-right font-medium">V</th>
-              <th className="py-1 text-right font-medium">Θ/day</th>
-              <th className="py-1 text-right font-medium text-ink-3">mIV</th>
-              <th className="py-1 text-right font-medium text-ink-3">V/$</th>
-              <th className={`py-1 text-right font-medium ${isShort ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400'}`}>BE IV</th>
+              <th className={thCls('left')} onClick={() => handleSortCol('type')}>Type{ind('type')}</th>
+              <th className={thCls('left')} onClick={() => handleSortCol('expiry')}>Expiry{ind('expiry')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('dte')}>DTE{ind('dte')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('callStrike')}>Strike(s){ind('callStrike')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('cost')}>{isShort ? 'Premium' : 'Cost'}{ind('cost')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('vega')}>V{ind('vega')}</th>
+              <th className={thCls('right')} onClick={() => handleSortCol('theta')}>Θ/day{ind('theta')}</th>
+              <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('markIV')}>mIV{ind('markIV')}</th>
+              <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('vegaPerDollar')} title="Vega per dollar spent. Higher = more vega per $ — better for longs.">V/${ind('vegaPerDollar')}</th>
+              <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('vegaTheta')} title="Vega per dollar of daily theta. Higher = more vega per unit of carry — better for longs.">V/Θ{ind('vegaTheta')}</th>
+              <th className={thCls('right', isShort ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')} onClick={() => handleSortCol('beIVMove')}>BE IV{ind('beIVMove')}</th>
               {daysToEvent && (
-                <th className="py-1 text-right font-medium text-amber-600 dark:text-amber-400">
-                  Θ→{fmtExpiry(eventDate)}
-                </th>
+                <th className={thCls('right', 'text-amber-600 dark:text-amber-400')} onClick={() => handleSortCol('thetaToEvent')}>Θ→{fmtExpiry(eventDate)}{ind('thetaToEvent')}</th>
               )}
               <th className="py-1 w-16" />
             </tr>
@@ -250,7 +281,7 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
                 : 0
               return (
                 <tr
-                  key={`${row.expiry}-${row.type}`}
+                  key={`${row.expiry}-${row.type}-${row.callStrike}-${row.putStrike}`}
                   className={classNames('border-b border-rim hover:bg-muted cursor-pointer', {
                     'bg-emerald-50 dark:bg-emerald-950/20': isBest && !isShort && !daysToEvent,
                     'bg-rose-50 dark:bg-rose-950/20':       isBest && isShort && !daysToEvent,
@@ -278,6 +309,9 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
                   </td>
                   <td className="py-1.5 text-right text-ink-3 font-mono">
                     {row.vegaPerDollar.toFixed(4)}
+                  </td>
+                  <td className="py-1.5 text-right text-ink-3 font-mono" title="Vega per dollar of daily theta decay">
+                    {row.vegaTheta.toFixed(2)}
                   </td>
                   <td className={classNames('py-1.5 text-right font-semibold font-mono', {
                     'text-emerald-600 dark:text-emerald-400': isBest && !isShort && !daysToEvent,

@@ -56,6 +56,9 @@ export default function Header({ exchange, onExchangeChange }: HeaderProps) {
           <a href="/builder" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
             Strategy Builder
           </a>
+          <a href="/portfolio" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
+            Portfolio
+          </a>
 
           <button
             onClick={toggle}

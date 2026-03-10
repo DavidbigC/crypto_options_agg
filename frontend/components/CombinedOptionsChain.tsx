@@ -36,6 +36,7 @@ interface CombinedRowProps {
   feesOn: boolean
   activeExchanges: Set<ExchangeKey>
   boxForStrike?: BoxSpread[]
+  daysToExpiry: number
 }
 
 function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | null | undefined }) {
@@ -46,7 +47,7 @@ function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | null | undefined })
   )
 }
 
-function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchanges, boxForStrike }: CombinedRowProps) {
+function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchanges, boxForStrike, daysToExpiry }: CombinedRowProps) {
   const withFee = (price: number, side: 'buy' | 'sell', ex: string) => {
     if (!feesOn || price === 0) return price
     const cap = FEE_CAP[ex] ?? 0.07
@@ -75,6 +76,14 @@ function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchan
   }
   const fmtG = (v: number | undefined | null, dp = 2) => !v ? '--' : v.toFixed(dp)
 
+  const sellAPR = (contract: CombinedOptionContract | undefined, collateral: number): string => {
+    if (!contract || daysToExpiry <= 0 || collateral <= 0) return '--'
+    const { val, ex } = bestFiltered(contract, 'sell')
+    if (!val || !ex) return '--'
+    const net = withFee(val, 'sell', ex)
+    if (net <= 0) return '--'
+    return ((net / collateral) * (365 / daysToExpiry) * 100).toFixed(1) + '%'
+  }
 
   const isITM = (type: 'call' | 'put') =>
     type === 'call' ? strike < spotPrice : strike > spotPrice
@@ -85,10 +94,15 @@ function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchan
       'border-rim': true,
     })}>
       {/* CALLS */}
-      <td className="px-2 py-1 text-right text-ink-2">
+      <td className="px-2 py-1 text-right text-ink-2 whitespace-nowrap">
         {(() => { const r = fmt(call, 'sell'); return <><span>{r.price}</span><ExBadge ex={r.ex} /></> })()}
       </td>
-      <td className="px-2 py-1 text-right text-ink-2">
+      <td className={classNames('px-1.5 py-1 text-right text-amber-600 dark:text-amber-400 text-[11px] font-mono', {
+        'opacity-30': isITM('call'),
+      })}>
+        {sellAPR(call, spotPrice)}
+      </td>
+      <td className="px-2 py-1 text-right text-ink-2 whitespace-nowrap">
         {(() => { const r = fmt(call, 'buy'); return <><span>{r.price}</span><ExBadge ex={r.ex} /></> })()}
       </td>
       <td className="px-2 py-1 text-right text-ink-3">{call ? fmtG(call.delta) : '--'}</td>
@@ -103,10 +117,10 @@ function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchan
       </td>
 
       {/* STRIKE */}
-      <td className={classNames('px-3 py-1 text-center font-mono font-semibold', {
+      <td className={classNames('relative px-3 py-1 text-center font-mono font-semibold', {
         'text-tone bg-amber-100 dark:bg-amber-900/30': isATM && !boxForStrike?.length,
         'text-ink': !isATM && !boxForStrike?.length,
-        'bg-amber-200 dark:bg-amber-800/50 text-amber-900 dark:text-amber-200 outline outline-1 outline-amber-500': !!boxForStrike?.length,
+        'bg-amber-200 dark:bg-amber-800/50 text-amber-900 dark:text-amber-200 outline outline-1 outline-amber-500 group/strike cursor-help': !!boxForStrike?.length,
       })}>
         {strike.toLocaleString()}
         {boxForStrike?.length ? (() => {
@@ -114,9 +128,12 @@ function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchan
           const label = best.type === 'long' ? 'LB' : 'SB'
           const count = boxForStrike.length
           return (
-            <span className="ml-1 text-[9px] bg-amber-500 text-white rounded px-0.5 font-bold whitespace-nowrap">
-              {label} +${best.profit.toFixed(0)}{count > 1 ? ` ×${count}` : ''}
-            </span>
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover/strike:block z-50 pointer-events-none">
+              <div className="bg-card border border-rim rounded px-2 py-1 text-[10px] shadow-xl whitespace-nowrap text-ink font-sans font-normal">
+                <span className="font-bold text-amber-600">{label}</span>
+                {' '}+${best.profit.toFixed(0)}{count > 1 ? ` ×${count}` : ''}
+              </div>
+            </div>
           )
         })() : null}
       </td>
@@ -132,10 +149,15 @@ function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchan
       <td className="px-1 py-1 text-left text-ink-3 text-[11px]">{put?.askVol  ? (put.askVol  * 100).toFixed(1) + '%' : '--'}</td>
       <td className="px-1 py-1 text-left text-ink-3 text-[11px]">{put?.markVol ? (put.markVol * 100).toFixed(1) + '%' : '--'}</td>
       <td className="px-1 py-1 text-left text-ink-3 text-[11px]">{put?.bidVol  ? (put.bidVol  * 100).toFixed(1) + '%' : '--'}</td>
-      <td className="px-2 py-1 text-left text-ink-2">
+      <td className="px-2 py-1 text-left text-ink-2 whitespace-nowrap">
         {(() => { const r = fmt(put, 'buy'); return <><ExBadge ex={r.ex} /><span>{r.price}</span></> })()}
       </td>
-      <td className="px-2 py-1 text-left text-ink-2">
+      <td className={classNames('px-1.5 py-1 text-left text-amber-600 dark:text-amber-400 text-[11px] font-mono', {
+        'opacity-30': isITM('put'),
+      })}>
+        {sellAPR(put, strike)}
+      </td>
+      <td className="px-2 py-1 text-left text-ink-2 whitespace-nowrap">
         {(() => { const r = fmt(put, 'sell'); return <><ExBadge ex={r.ex} /><span>{r.price}</span></> })()}
       </td>
     </tr>
@@ -199,6 +221,8 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
     }
   }
 
+  const daysToExpiry = Math.max(0, (new Date(expiration + 'T08:00:00Z').getTime() - Date.now()) / 86_400_000)
+
   return (
     <div className="card">
       <div className="flex items-center justify-between mb-4">
@@ -219,7 +243,7 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
                 onClick={() => toggleExchange(ex)}
                 className={classNames('px-1.5 py-0.5 rounded font-bold transition-opacity', EX_COLOR[ex], {
                   'text-white opacity-100': activeExchanges.has(ex),
-                  'opacity-30': !activeExchanges.has(ex),
+                  'opacity-50': !activeExchanges.has(ex),
                 })}
               >
                 {EX_LABEL[ex]}
@@ -247,12 +271,13 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-rim">
-              <th colSpan={10} className="text-center py-1 text-green-700 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 text-xs">CALLS</th>
+              <th colSpan={11} className="text-center py-1 text-green-700 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 text-xs">CALLS</th>
               <th className="w-16" />
-              <th colSpan={10} className="text-center py-1 text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-900/20 text-xs">PUTS</th>
+              <th colSpan={11} className="text-center py-1 text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-900/20 text-xs">PUTS</th>
             </tr>
             <tr className="border-b border-rim text-ink-2 text-xs">
               <th className="px-2 py-1 text-right font-medium">Best Bid</th>
+              <th className="px-1.5 py-1 text-right font-medium text-amber-600 dark:text-amber-400">APR</th>
               <th className="px-2 py-1 text-right font-medium">Best Ask</th>
               <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" className="px-2 py-1" />
               <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" className="px-2 py-1" />
@@ -272,6 +297,7 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
               <th className="px-1 py-1 text-left font-medium text-ink-3">mIV</th>
               <th className="px-1 py-1 text-left font-medium text-ink-3">bIV</th>
               <th className="px-2 py-1 text-left font-medium">Best Ask</th>
+              <th className="px-1.5 py-1 text-left font-medium text-amber-600 dark:text-amber-400">APR</th>
               <th className="px-2 py-1 text-left font-medium">Best Bid</th>
             </tr>
           </thead>
@@ -287,6 +313,7 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
                 feesOn={feesOn}
                 activeExchanges={activeExchanges}
                 boxForStrike={strikeToBox.get(strike)}
+                daysToExpiry={daysToExpiry}
               />
             ))}
           </tbody>
