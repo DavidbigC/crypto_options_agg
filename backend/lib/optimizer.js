@@ -344,6 +344,50 @@ function enumSingleExpiry(expiry, chain, spotPrice, maxLegs) {
         { side: 'sell', type: 'put', strike: b.otmPut1,  expiry, qty: 1 },
       ])
     }
+
+    // Backspreads: short 1 near-ATM, buy 2 further OTM — long gamma, convex
+    if (b.otmCall1 !== b.atm && b.otmCall2 !== b.otmCall1) {
+      add('Call Backspread', [
+        { side: 'sell', type: 'call', strike: b.atm,      expiry, qty: 1 },
+        { side: 'buy',  type: 'call', strike: b.otmCall1, expiry, qty: 2 },
+      ])
+    }
+    if (b.otmPut1 !== b.atm && b.otmPut2 !== b.otmPut1) {
+      add('Put Backspread', [
+        { side: 'sell', type: 'put', strike: b.atm,      expiry, qty: 1 },
+        { side: 'buy',  type: 'put', strike: b.otmPut1,  expiry, qty: 2 },
+      ])
+    }
+
+    // Short butterflies: bet on breakout, not pinning
+    if (b.otmCall1 !== b.atm && b.otmCall2 !== b.otmCall1) {
+      add('Short Call Butterfly', [
+        { side: 'sell', type: 'call', strike: b.atm,      expiry, qty: 1 },
+        { side: 'buy',  type: 'call', strike: b.otmCall1, expiry, qty: 2 },
+        { side: 'sell', type: 'call', strike: b.otmCall2, expiry, qty: 1 },
+      ])
+    }
+    if (b.otmPut1 !== b.atm && b.otmPut2 !== b.otmPut1) {
+      add('Short Put Butterfly', [
+        { side: 'sell', type: 'put', strike: b.atm,      expiry, qty: 1 },
+        { side: 'buy',  type: 'put', strike: b.otmPut1,  expiry, qty: 2 },
+        { side: 'sell', type: 'put', strike: b.otmPut2,  expiry, qty: 1 },
+      ])
+    }
+
+    // Seagull: long OTM call + short lower put + short higher call (cheap directional)
+    if (b.otmCall1 !== b.atm && b.otmCall2 !== b.otmCall1 && b.otmPut1 !== b.atm) {
+      add('Seagull (Bullish)', [
+        { side: 'buy',  type: 'call', strike: b.atm,      expiry, qty: 1 },
+        { side: 'sell', type: 'put',  strike: b.otmPut1,  expiry, qty: 1 },
+        { side: 'sell', type: 'call', strike: b.otmCall1, expiry, qty: 1 },
+      ])
+      add('Seagull (Bearish)', [
+        { side: 'buy',  type: 'put',  strike: b.atm,      expiry, qty: 1 },
+        { side: 'sell', type: 'call', strike: b.otmCall1, expiry, qty: 1 },
+        { side: 'sell', type: 'put',  strike: b.otmPut1,  expiry, qty: 1 },
+      ])
+    }
   }
 
   if (maxLegs >= 4) {
