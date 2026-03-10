@@ -1,66 +1,66 @@
-# Bybit Options Trading Interface
+# Crypto Options Workspace
 
-A modern web-based interface for viewing and analyzing Bybit cryptocurrency options, similar to the official Bybit platform.
+App-first workspace for watching crypto options markets, comparing exchange quotes, and testing strategy ideas from a browser UI.
 
-## Features
+The public repo is centered on the web app:
 
-- **Real-time Options Data**: Live options chains for BTC, ETH, and SOL
-- **Professional Interface**: Clean, modern UI similar to Bybit's official platform
-- **Multiple Expiration Dates**: Easy switching between different expiration dates
-- **Options Chain View**: Side-by-side calls and puts with bid/ask spreads, volume, and Greeks
-- **Strategy Recommendations**: Built-in strategy suggestions based on market conditions
-- **Market Analytics**: Put/call ratios, implied volatility, and other key metrics
+- `frontend/`: Next.js interface for chains, scanners, optimizer, builder, portfolio, and analysis views
+- `backend/`: Express API and market-data services for Bybit, OKX, Deribit, and Derive
+- `docs/`: design notes and implementation plans
 
-## Architecture
+Legacy research material and local-only experiments are intentionally left out of the GitHub-facing scope.
 
-- **Frontend**: Next.js 14 with TypeScript and Tailwind CSS
-- **Backend**: Node.js/Express API serving live data from Bybit
-- **Data Source**: Bybit V5 REST API
+## Current capabilities
 
-## Quick Start
+- Live options chains for BTC, ETH, and SOL
+- Exchange switching for Bybit, OKX, and combined views
+- Cross-exchange arbitrage and box spread views
+- Gamma and vega scanners
+- Strategy optimizer
+- Position builder and portfolio pages
+- Backend services for streaming and polling market data
 
-### Prerequisites
+## Repo layout
+
+```text
+.
+├── backend/             # Express API, exchange adapters, analytics, tests
+├── docs/                # Plans and reference docs
+├── frontend/            # Next.js app router UI
+├── ecosystem.config.js  # Optional PM2 config
+├── start.sh             # Starts backend and frontend together
+└── README.md
+```
+
+## Requirements
 
 - Node.js 18+
-- npm or yarn
+- npm
 
-### 1. Start the Backend
+## Local development
 
-```bash
-./start_backend.sh
-```
-
-This will:
-- Install Node.js dependencies 
-- Create environment configuration
-- Start the Express server on http://localhost:8000
-
-### 2. Start the Frontend
+Install and run both services with:
 
 ```bash
-./start_frontend.sh
+./start.sh
 ```
 
-This will:
-- Install Node.js dependencies
-- Start the Next.js dev server on http://localhost:3000
+That script:
 
-### 3. Open the Application
+- installs backend dependencies if missing
+- installs frontend dependencies if missing
+- seeds `backend/.env` from `backend/.env.example` if needed
+- starts the backend on `http://localhost:3500`
+- starts the frontend on `http://localhost:3000`
 
-Navigate to http://localhost:3000 in your browser.
-
-## Manual Setup
-
-### Backend Setup
+If you prefer to run each service manually:
 
 ```bash
 cd backend
 npm install
-cp .env.example .env  # Configure environment variables
+cp .env.example .env
 npm run dev
 ```
-
-### Frontend Setup
 
 ```bash
 cd frontend
@@ -68,134 +68,34 @@ npm install
 npm run dev
 ```
 
-## API Endpoints
+## Environment
 
-- `GET /api/options/{crypto}` - Get full options data for BTC, ETH, or SOL
-- `GET /api/options/{crypto}/{expiration}` - Get options chain for specific expiration
-- `GET /api/spot/{symbol}` - Get current spot price
-- `GET /api/spots` - Get multiple spot prices (BTC, ETH, SOL)
-- `GET /api/market-stats/{crypto}` - Get market statistics and analytics
-- `GET /api/health` - Health check
+The backend reads `backend/.env`. The checked-in example is enough for local startup; the only required runtime setting in the current codepath is `PORT`, which defaults to `3500`.
 
-## Project Structure
+If you add private exchange credentials or other local settings, keep them in ignored `.env` files only.
 
-```
-├── bybit_options.py          # Original Python script with strategy analysis
-├── backend/
-│   ├── server.js            # Express API server
-│   ├── lib/
-│   │   ├── bybit-api.js     # Bybit API client
-│   │   └── utils.js         # Utility functions
-│   ├── package.json         # Node.js dependencies
-│   └── .env.example         # Environment configuration template
-├── frontend/
-│   ├── app/                 # Next.js app directory
-│   ├── components/          # React components
-│   ├── types/              # TypeScript type definitions
-│   └── package.json        # Node.js dependencies
-├── start_backend.sh        # Backend startup script
-├── start_frontend.sh       # Frontend startup script
-└── README.md
-```
+## Key app areas
 
-## Components
+- `/`: main options chain and scanner surface
+- `/optimizer`: multi-leg strategy optimizer
+- `/builder`: position builder
+- `/portfolio`: portfolio tools
+- `/analysis`: analysis workspace
 
-### Frontend Components
+## Notes for GitHub
 
-- **Header**: Navigation and branding
-- **CryptocurrencyTabs**: Switch between BTC, ETH, SOL
-- **ExpirationTabs**: Select expiration dates
-- **OptionsChain**: Main options chain table
-- **TradingPanel**: Strategy suggestions and market analytics
+This repository is being kept intentionally narrow for publishing:
 
-### Backend API
+- core app code lives in `frontend/` and `backend/`
+- planning docs stay under `docs/`
+- generated files, private env files, research folders, and local scratch material are excluded
 
-- **Express Server**: RESTful API serving options data from Bybit
-- **Real-time Data**: Live bid/ask/volume/Greeks data
-- **Advanced Endpoints**: Market statistics, specific expiration data
-- **Error Handling**: Robust error handling and logging
-- **Utility Functions**: Greeks calculations, time to expiration, data sanitization
+## Development notes
 
-## Features in Detail
-
-### Options Chain
-
-- Side-by-side calls and puts display
-- Real-time bid/ask spreads
-- Volume and open interest
-- Greeks (Delta, Gamma, Theta, Vega)
-- ITM/OTM indicators
-- Strike highlighting for ATM options
-
-### Trading Panel
-
-- **Strategies Tab**: Pre-built strategy recommendations
-- **Positions Tab**: Portfolio management (coming soon)
-- **Analytics Tab**: Market metrics and analysis
-
-### Market Data
-
-- Live spot prices with 24h change
-- Implied volatility calculations
-- Put/call ratios
-- Max pain analysis
-
-## Customization
-
-The interface can be easily customized by:
-
-1. **Colors**: Modify `tailwind.config.js` for custom color schemes
-2. **Strategies**: Add new strategies in `TradingPanel.tsx`
-3. **Data Sources**: Extend backend to support additional exchanges
-4. **Components**: Create new React components in `/components`
-
-## Development
-
-### Adding New Features
-
-1. **Backend**: Add new endpoints in `backend/server.js`
-2. **API Client**: Extend functionality in `backend/lib/bybit-api.js`
-3. **Frontend**: Create new components in `frontend/components/`
-4. **Types**: Update TypeScript types in `frontend/types/`
-
-### Environment Variables
-
-Create `.env.local` in the frontend directory for configuration:
-
-```
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Port conflicts**: Change ports in startup scripts if 3000/8000 are in use
-2. **API errors**: Check that Bybit API is accessible
-3. **Missing data**: Some options may not have complete Greeks data
-
-### Logs
-
-- Backend logs: Check terminal running Express server
-- Frontend logs: Check browser console and terminal running Next.js
+- Backend entrypoint: `backend/server.js`
+- Frontend entrypoint: `frontend/app/page.tsx`
+- Package manifests live in `backend/package.json` and `frontend/package.json`
 
 ## License
 
-This project is for educational purposes. Please respect Bybit's API terms of service.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
-
-## Roadmap
-
-- [ ] Real-time WebSocket data
-- [ ] Strategy backtesting
-- [ ] Portfolio tracking
-- [ ] Mobile responsive design
-- [ ] Additional cryptocurrencies
-- [ ] Export functionality
-- [ ] Paper trading simulation
+No license is currently declared in this repository.
