@@ -85,8 +85,8 @@ function scoreStrategy(netGreeks, targets, totalCost) {
     score += alignment
   }
 
-  if (targeted === 0 || totalCost <= 0) return 0
-  return (score / targeted) / totalCost * 1000
+  if (targeted === 0) return 0
+  return (score / targeted) / Math.max(Math.abs(totalCost), 1) * 1000
 }
 
 function computeRebalancingNote(netGreeks, legs, spotPrice) {
@@ -336,24 +336,30 @@ function enumSingleExpiry(expiry, chain, spotPrice, maxLegs) {
   if (maxLegs >= 5) {
     if (b.otmCall3 !== b.otmCall2) {
       add('Call Condor', [
-        { side: 'buy',  type: 'call', strike: b.atm,      expiry, qty: 1 },
+        { side: 'buy',  type: 'call', strike: b.atm,       expiry, qty: 1 },
         { side: 'sell', type: 'call', strike: b.otmCall1,  expiry, qty: 1 },
         { side: 'sell', type: 'call', strike: b.otmCall2,  expiry, qty: 1 },
         { side: 'buy',  type: 'call', strike: b.otmCall3,  expiry, qty: 1 },
-        { side: 'buy',  type: 'put',  strike: b.atm,       expiry, qty: 1 },
+      ])
+      add('Put Condor', [
+        { side: 'buy',  type: 'put',  strike: b.atm,      expiry, qty: 1 },
+        { side: 'sell', type: 'put',  strike: b.otmPut1,  expiry, qty: 1 },
+        { side: 'sell', type: 'put',  strike: b.otmPut2,  expiry, qty: 1 },
+        { side: 'buy',  type: 'put',  strike: b.otmPut3,  expiry, qty: 1 },
       ])
     }
   }
 
   if (maxLegs >= 6) {
-    if (b.otmCall1 !== b.atm && b.otmCall2 !== b.otmCall1 && b.otmCall3 !== b.otmCall2) {
-      add('Christmas Tree (Call)', [
-        { side: 'buy',  type: 'call', strike: b.atm,      expiry, qty: 1 },
-        { side: 'sell', type: 'call', strike: b.otmCall1,  expiry, qty: 1 },
-        { side: 'sell', type: 'call', strike: b.otmCall2,  expiry, qty: 1 },
-        { side: 'sell', type: 'call', strike: b.otmCall3,  expiry, qty: 1 },
+    if (b.otmCall1 !== b.atm && b.otmPut1 !== b.atm &&
+        b.otmCall2 !== b.otmCall1 && b.otmPut2 !== b.otmPut1) {
+      add('Double Ratio Spread', [
+        { side: 'buy',  type: 'call', strike: b.atm,       expiry, qty: 1 },
         { side: 'buy',  type: 'put',  strike: b.atm,       expiry, qty: 1 },
-        { side: 'sell', type: 'put',  strike: b.otmPut2,  expiry, qty: 1 },
+        { side: 'sell', type: 'call', strike: b.otmCall1,  expiry, qty: 2 },
+        { side: 'sell', type: 'put',  strike: b.otmPut1,   expiry, qty: 2 },
+        { side: 'buy',  type: 'call', strike: b.otmCall2,  expiry, qty: 1 },
+        { side: 'buy',  type: 'put',  strike: b.otmPut2,   expiry, qty: 1 },
       ])
     }
   }
@@ -469,7 +475,7 @@ export function runOptimizer(combinedOptionsData, spotPrice, futures, targets, m
     })
     .map(c => ({
       ...c,
-      score: scoreStrategy(c.netGreeks, targets, Math.max(c.totalCost, 1)),
+      score: scoreStrategy(c.netGreeks, targets, c.totalCost),
       rebalancingNote: computeRebalancingNote(c.netGreeks, c.legs, spotPrice),
     }))
     .filter(c => c.score > 0)
