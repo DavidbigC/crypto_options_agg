@@ -607,5 +607,22 @@ export function runOptimizer(combinedOptionsData, spotPrice, futures, targets, m
     if (!seen.has(key)) { seen.add(key); deduped.push(c) }
   }
 
-  return deduped.slice(0, 10)
+  // Guarantee multi-expiry strategies appear: take top 10 overall, then inject
+  // up to 5 best multi-expiry candidates not already present.
+  const isMultiExpiry = (c) =>
+    new Set(c.legs.filter(l => l.type !== 'future').map(l => l.expiry)).size > 1
+
+  const top10 = deduped.slice(0, 10)
+  const top10Keys = new Set(top10.map(c =>
+    `${c.name}|${c.legs.map(l => `${l.expiry}:${l.strike}:${l.type}:${l.side}`).join(',')}`
+  ))
+
+  const bonusMulti = deduped
+    .filter(c => isMultiExpiry(c))
+    .filter(c => !top10Keys.has(
+      `${c.name}|${c.legs.map(l => `${l.expiry}:${l.strike}:${l.type}:${l.side}`).join(',')}`
+    ))
+    .slice(0, 5)
+
+  return [...top10, ...bonusMulti].sort((a, b) => b.score - a.score)
 }
