@@ -28,6 +28,7 @@ import { scannerCache, updateScannerCache, computeGammaRows, computeVegaRows } f
 
 import { runOptimizer } from './lib/optimizer.js'
 import { createOkxPortfolioService } from './lib/okx-portfolio.js'
+import { createBybitPortfolioService } from './lib/bybit-portfolio.js'
 import { getEnvPaths } from './lib/env-paths.js'
 
 
@@ -39,6 +40,7 @@ for (const envPath of getEnvPaths(backendDir)) {
 const app = express();
 const PORT = process.env.PORT || 3500;
 const okxPortfolioService = createOkxPortfolioService({ env: process.env })
+const bybitPortfolioService = createBybitPortfolioService({ env: process.env })
 
 // Middleware
 app.use(cors());
@@ -645,6 +647,17 @@ app.get('/api/portfolio/okx', async (req, res) => {
   } catch (error) {
     const message = error?.message || 'Internal server error'
     const status = /missing okx credentials/i.test(message) ? 503 : 502
+    res.status(status).json({ error: message })
+  }
+})
+
+app.get('/api/portfolio/bybit', async (req, res) => {
+  try {
+    const portfolio = await bybitPortfolioService.fetchPortfolio()
+    res.json(portfolio)
+  } catch (error) {
+    const message = error?.message || 'Internal server error'
+    const status = /missing bybit credentials/i.test(message) ? 503 : 502
     res.status(status).json({ error: message })
   }
 })

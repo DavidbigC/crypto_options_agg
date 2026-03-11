@@ -8,6 +8,7 @@ import { useTheme } from '@/components/ThemeProvider'
 interface HeaderProps {
   exchange: Exchange
   onExchangeChange: (exchange: Exchange) => void
+  hideExchangeSelector?: boolean
 }
 
 const EXCHANGES: { id: Exchange; label: string }[] = [
@@ -18,7 +19,7 @@ const EXCHANGES: { id: Exchange; label: string }[] = [
   { id: 'combined', label: 'Combined' },
 ]
 
-export default function Header({ exchange, onExchangeChange }: HeaderProps) {
+export default function Header({ exchange, onExchangeChange, hideExchangeSelector = false }: HeaderProps) {
   const { theme, toggle } = useTheme()
 
   return (
@@ -27,23 +28,24 @@ export default function Header({ exchange, onExchangeChange }: HeaderProps) {
         <div className="flex items-center gap-4">
           <a href="/" target="_blank" rel="noopener noreferrer" className="text-sm font-semibold text-ink tracking-tight shrink-0 hover:text-tone transition-colors">Options</a>
 
-          {/* Exchange selector */}
-          <div className="flex items-center bg-muted rounded-md p-0.5 gap-0.5">
-            {EXCHANGES.map(({ id, label }) => (
-              <button
-                key={id}
-                onClick={() => onExchangeChange(id)}
-                className={classNames(
-                  'px-3 py-1 rounded text-xs font-medium transition-colors',
-                  exchange === id
-                    ? 'bg-card text-ink shadow-sm'
-                    : 'text-ink-2 hover:text-ink'
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {!hideExchangeSelector && (
+            <div className="flex items-center bg-muted rounded-md p-0.5 gap-0.5">
+              {EXCHANGES.map(({ id, label }) => (
+                <button
+                  key={id}
+                  onClick={() => onExchangeChange(id)}
+                  className={classNames(
+                    'px-3 py-1 rounded text-xs font-medium transition-colors',
+                    exchange === id
+                      ? 'bg-card text-ink shadow-sm'
+                      : 'text-ink-2 hover:text-ink'
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="flex-1" />
 

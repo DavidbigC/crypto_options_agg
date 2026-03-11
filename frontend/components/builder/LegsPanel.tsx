@@ -4,6 +4,7 @@ import classNames from 'classnames'
 import { Leg, OptionsData } from '@/types/options'
 import { bsGreeks, bsPrice } from '@/lib/blackScholes'
 import { EX_SOFT, EX_LABEL } from '@/lib/exchangeColors'
+import { resolveCloseoutPrice } from '@/lib/liveCloseoutPricing.js'
 
 interface LegsPanelProps {
   legs: Leg[]
@@ -38,17 +39,17 @@ export default function LegsPanel({ legs, spotPrice, optionsData, onUpdate, onRe
   }, { delta: 0, gamma: 0, theta: 0, vega: 0 })
 
   const getLivePrice = (leg: Leg): number => {
-    if (leg.type === 'future') return spotPrice   // futures mark = current spot
+    if (leg.type === 'future') return spotPrice
     if (!optionsData) return 0
     const chain = optionsData.data[leg.expiry]
     if (!chain) return 0
     const arr = leg.type === 'call' ? chain.calls : chain.puts
     const contract = arr.find(c => c.strike === leg.strike)
-    if (contract?.markPrice && contract.markPrice > 0) return contract.markPrice
     const daysToExpiry = Math.max(0, (new Date(leg.expiry).getTime() - Date.now()) / 86_400_000)
     const T = Math.max(0, daysToExpiry / 365)
     const sigma = Math.max(0.001, contract?.markVol || contract?.impliedVolatility || leg.markVol || 0.5)
-    return bsPrice(spotPrice, leg.strike, T, sigma, 0, leg.type)
+    const fallbackPrice = bsPrice(spotPrice, leg.strike, T, sigma, 0, leg.type)
+    return resolveCloseoutPrice({ leg, contract, fallbackPrice })
   }
 
   const totalCost = legs.filter(l => l.enabled).reduce((sum, l) => {
@@ -92,7 +93,7 @@ export default function LegsPanel({ legs, spotPrice, optionsData, onUpdate, onRe
               <th className="py-1 text-center">C/P</th>
               <th className="py-1 text-right">Qty</th>
               <th className="py-1 text-right">Entry</th>
-              <th className="py-1 text-right">Mark</th>
+              <th className="py-1 text-right">Exit</th>
               <th className="py-1 text-right">P&L</th>
               <th className="py-1 text-right text-ink-3">Δ</th>
               <th className="py-1 text-right text-ink-3">Γ</th>
@@ -147,9 +148,9 @@ export default function LegsPanel({ legs, spotPrice, optionsData, onUpdate, onRe
                     </span>
                   </td>
                   <td className="py-1 text-right">
-                    <input type="number" min={1} value={leg.qty}
-                      onChange={e => onUpdate(leg.id, { qty: Math.max(1, parseInt(e.target.value) || 1) })}
-                      className="w-12 text-right border border-rim rounded px-1 py-0.5 text-xs bg-card text-ink" />
+                    <input type="number" min={0.01} step={0.01} value={leg.qty}
+                      onChange={e => onUpdate(leg.id, { qty: Math.max(0.01, parseFloat(e.target.value) || 0.01) })}
+                      className="w-16 text-right border border-rim rounded px-1 py-0.5 text-xs bg-card text-ink" />
                   </td>
                   <td className="py-1 text-right">
                     <input type="number" step={0.01} value={leg.entryPrice}

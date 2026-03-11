@@ -38,9 +38,13 @@ const response = {
 const result = computeAnalysis(response, 100)
 
 assert.ok(result, 'computeAnalysis should return analysis data')
+assert.equal(typeof result.updatedAt, 'number', 'updatedAt should be present for freshness checks')
 assert.ok(result.rawSurface, 'rawSurface should be present')
 assert.equal(result.rawSurface.expiries.length, 1, 'past expiries should be excluded')
 assert.equal(result.rawSurface.expiries[0].exp, futureExpiry, 'future expiry should be retained')
+
+const bucketLabels = result.rawSurface.buckets.map(bucket => bucket.label)
+assert.equal(new Set(bucketLabels).size, bucketLabels.length, 'raw surface bucket labels should be unique')
 
 const atmCell = result.rawSurface.cells.find(cell => cell.exp === futureExpiry && cell.bucketLabel === 'ATM')
 assert.ok(atmCell, 'ATM bucket should be present')

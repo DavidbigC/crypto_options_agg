@@ -1,4 +1,7 @@
-import { CONTRACT_SIZES, Leg } from '@/types/options'
+import { Leg } from '@/types/options'
+import { normalizeImportedPositionSize } from './positionSizing.js'
+
+export type PortfolioExchange = 'okx' | 'bybit'
 
 export interface PortfolioAccount {
   label: string
@@ -56,7 +59,7 @@ export interface PortfolioGreeks {
 }
 
 export interface PortfolioResponse {
-  exchange: 'okx'
+  exchange: PortfolioExchange
   account: PortfolioAccount
   summary: PortfolioSummary
   balances: PortfolioBalance[]
@@ -114,7 +117,10 @@ export function groupPositionsByCoin(positions: PortfolioPosition[]) {
   }, {})
 }
 
-export function buildLiveSimulatorLegs(positions: PortfolioPosition[]): Leg[] {
+export function buildLiveSimulatorLegs(
+  positions: PortfolioPosition[],
+  exchange: PortfolioExchange = 'okx',
+): Leg[] {
   return positions
     .filter((position) => position.kind === 'option' || position.kind === 'future' || position.kind === 'swap')
     .map((position) => {
@@ -122,23 +128,26 @@ export function buildLiveSimulatorLegs(positions: PortfolioPosition[]): Leg[] {
       const type = position.kind === 'option'
         ? (position.optionType ?? 'call')
         : 'future'
-      const contractSize = position.kind === 'option'
-        ? (CONTRACT_SIZES.okx?.[coin] ?? 1)
-        : 1
+      const { qty, contractSize } = normalizeImportedPositionSize({
+        exchange,
+        coin,
+        kind: position.kind,
+        size: position.size,
+      })
       const entryPrice = position.kind === 'option'
         ? position.averagePrice * (position.referencePrice || 1)
         : position.averagePrice
 
       return {
         id: crypto.randomUUID(),
-        exchange: 'okx',
+        exchange,
         coin,
         symbol: position.instrument,
         expiry: position.expiry || 'perpetual',
         strike: position.strike ?? 0,
         type,
         side: position.size >= 0 ? 'buy' : 'sell',
-        qty: Math.max(1, Math.abs(position.size)),
+        qty,
         entryPrice,
         markVol: 0.5,
         contractSize,

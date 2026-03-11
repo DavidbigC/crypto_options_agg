@@ -1,100 +1,241 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import classNames from 'classnames'
 import Header from '@/components/Header'
-import { OptionsData, Exchange } from '@/types/options'
+import { OptionsData } from '@/types/options'
 import { filterExpirations } from '@/lib/filterExpirations'
+import { EX_ACTIVE, EX_SOFT, EX_NAME } from '@/lib/exchangeColors'
 import {
-  LineChart, Line, BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Legend,
+  buildSkewChartData,
+  buildSurfaceComparison,
+  buildTermStructureChartData,
+  getDatasetFreshness,
+} from '@/lib/analysisComparison.js'
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from 'recharts'
 
+const RESEARCH_EXCHANGES = ['combined', 'deribit', 'okx', 'bybit'] as const
+const OVERLAY_EXCHANGES = ['deribit', 'okx', 'bybit'] as const
 const OKX_FAMILY_MAP: Record<string, string> = {
   BTC: 'BTC-USD',
   ETH: 'ETH-USD',
   SOL: 'SOL-USD',
 }
-
+const EXCHANGE_COLORS: Record<string, string> = {
+  combined: '#71717a',
+  deribit: '#2563eb',
+  okx: '#52525b',
+  bybit: '#f59e0b',
+}
 const MS_PER_YEAR = 365.25 * 24 * 3600 * 1000
 
+type OverlayExchange = typeof OVERLAY_EXCHANGES[number]
+type ResearchExchange = typeof RESEARCH_EXCHANGES[number]
+type ComparisonMode = 'level' | 'spread'
+type SkewMetric = 'rr' | 'bf'
+type AnalysisFit = { params: { a: number; b: number; rho: number; m: number; sigma: number }; rmse: number; T: number } | null
+type SurfaceCell = {
+  exp: string
+  label: string
+  dte: number
+  bucketKey: number
+  bucketLabel: string
+  moneynessPct: number
+  avgMarkIV: number
+  count: number
+  minStrike: number
+  maxStrike: number
+  optionTypes: string[]
+}
+type RawSurface = {
+  expiries: Array<{ exp: string; label: string; dte: number }>
+  buckets: Array<{ key: number; label: string; moneynessPct: number }>
+  cells: SurfaceCell[]
+}
+type AnalysisPayload = {
+  sviFits: Record<string, AnalysisFit>
+  termStructure: Array<{ label: string; dte: number; atmIV: number; exp: string }>
+  skewData: Array<{ label: string; rr: number; bf: number; exp: string }>
+  rawSurface: RawSurface
+  updatedAt: number
+}
+type SurfaceComparisonCell = SurfaceCell & {
+  venueAvgMarkIV: number | null
+  venueCount: number
+  spread: number | null
+}
+type SurfaceComparison = {
+  expiries: RawSurface['expiries']
+  buckets: RawSurface['buckets']
+  cells: SurfaceComparisonCell[]
+}
+
+function coinForExchange(exchange: ResearchExchange, coin: 'BTC' | 'ETH' | 'SOL') {
+  return exchange === 'okx' ? OKX_FAMILY_MAP[coin] : coin
+}
+
+function buildSmileChartData(
+  selectedExpiration: string,
+  optionsData: OptionsData | null,
+  spotPrice: number,
+  analysisByExchange: Record<ResearchExchange, AnalysisPayload | null>,
+  overlays: OverlayExchange[]
+) {
+  if (!selectedExpiration || !optionsData || !spotPrice) return []
+
+  const chain = optionsData.data[selectedExpiration]
+  if (!chain) return []
+
+  const rawMap = new Map<number, { mark: number; bid: number | null; ask: number | null }>()
+  for (const c of chain.calls) {
+    const mv = c.markVol ?? 0
+    if (c.strike >= spotPrice && mv > 0) {
+      rawMap.set(c.strike, {
+        mark: mv * 100,
+        bid: c.bidVol ? c.bidVol * 100 : null,
+        ask: c.askVol ? c.askVol * 100 : null,
+      })
+    }
+  }
+  for (const p of chain.puts) {
+    const mv = p.markVol ?? 0
+    if (p.strike <= spotPrice && mv > 0 && !rawMap.has(p.strike)) {
+      rawMap.set(p.strike, {
+        mark: mv * 100,
+        bid: p.bidVol ? p.bidVol * 100 : null,
+        ask: p.askVol ? p.askVol * 100 : null,
+      })
+    }
+  }
+
+  const rawPoints = Array.from(rawMap.entries())
+    .map(([strike, values]) => ({ strike, ...values }))
+    .sort((a, b) => a.strike - b.strike)
+
+  if (!rawPoints.length) return []
+
+  const visibleExchanges = ['combined', ...overlays] as ResearchExchange[]
+  const fitEntries = visibleExchanges
+    .map((exchange) => ({
+      exchange,
+      fit: analysisByExchange[exchange]?.sviFits?.[selectedExpiration] ?? null,
+    }))
+    .filter((entry) => entry.fit)
+
+  const logMoneys = rawPoints.map((point) => Math.log(point.strike / spotPrice))
+  const kMin = Math.min(...logMoneys) - 0.05
+  const kMax = Math.max(...logMoneys) + 0.05
+
+  const curveRows = Array.from({ length: 120 }, (_, index) => {
+    const k = kMin + (kMax - kMin) * index / 119
+    const strike = spotPrice * Math.exp(k)
+    const row: Record<string, number | null> = {
+      x: strike,
+      mark: null,
+      bid: null,
+      ask: null,
+    }
+
+    for (const { exchange, fit } of fitEntries) {
+      if (!fit) continue
+      const { a, b, rho, m, sigma } = fit.params
+      const d = k - m
+      const w = a + b * (rho * d + Math.sqrt(d * d + sigma * sigma))
+      const iv = w > 0 ? Math.sqrt(w / fit.T) * 100 : 0
+      row[`fit_${exchange}`] = iv > 0 && iv < 500 ? iv : null
+    }
+
+    return row
+  })
+
+  const rawRows = rawPoints.map((point) => ({
+    x: point.strike,
+    mark: point.mark,
+    bid: point.bid,
+    ask: point.ask,
+  }))
+
+  return [...curveRows, ...rawRows].sort((a, b) => Number(a.x) - Number(b.x))
+}
+
 export default function AnalysisPage() {
-  const [exchange, setExchange] = useState<Exchange>('deribit')
   const [selectedCrypto, setSelectedCrypto] = useState<'BTC' | 'ETH' | 'SOL'>('BTC')
   const [selectedExpiration, setSelectedExpiration] = useState<string>('')
   const [optionsData, setOptionsData] = useState<OptionsData | null>(null)
   const [spotPrice, setSpotPrice] = useState<number>(0)
-  const [loading, setLoading] = useState(false)
-  const [analysisData, setAnalysisData] = useState<{
-    sviFits: Record<string, { params: { a: number; b: number; rho: number; m: number; sigma: number }; rmse: number; T: number } | null>
-    termStructure: Array<{ label: string; dte: number; atmIV: number; exp: string }>
-    skewData: Array<{ label: string; rr: number; bf: number; exp: string }>
-    rawSurface: {
-      expiries: Array<{ exp: string; label: string; dte: number }>
-      buckets: Array<{ key: number; label: string; moneynessPct: number }>
-      cells: Array<{
-        exp: string
-        label: string
-        dte: number
-        bucketKey: number
-        bucketLabel: string
-        moneynessPct: number
-        avgMarkIV: number
-        count: number
-        minStrike: number
-        maxStrike: number
-        optionTypes: string[]
-      }>
-    }
-  } | null>(null)
-  const [activeSurfaceCell, setActiveSurfaceCell] = useState<{
-    exp: string
-    label: string
-    dte: number
-    bucketKey: number
-    bucketLabel: string
-    moneynessPct: number
-    avgMarkIV: number
-    count: number
-    minStrike: number
-    maxStrike: number
-    optionTypes: string[]
-  } | null>(null)
+  const [loadingOptions, setLoadingOptions] = useState(false)
+  const [analysisByExchange, setAnalysisByExchange] = useState<Record<ResearchExchange, AnalysisPayload | null>>({
+    combined: null,
+    deribit: null,
+    okx: null,
+    bybit: null,
+  })
+  const [analysisErrors, setAnalysisErrors] = useState<Record<ResearchExchange, string | null>>({
+    combined: null,
+    deribit: null,
+    okx: null,
+    bybit: null,
+  })
+  const [overlayVisibility, setOverlayVisibility] = useState<Record<OverlayExchange, boolean>>({
+    deribit: true,
+    okx: true,
+    bybit: false,
+  })
+  const [termMode, setTermMode] = useState<ComparisonMode>('level')
+  const [skewMode, setSkewMode] = useState<ComparisonMode>('level')
+  const [skewMetric, setSkewMetric] = useState<SkewMetric>('rr')
+  const [surfaceMode, setSurfaceMode] = useState<ComparisonMode>('level')
+  const [surfaceComparisonExchange, setSurfaceComparisonExchange] = useState<OverlayExchange>('deribit')
+  const [activeSurfaceKey, setActiveSurfaceKey] = useState<string | null>(null)
   const fetchVersion = useRef(0)
   const selectedExpirationRef = useRef('')
 
   useEffect(() => {
     fetchVersion.current++
     const version = fetchVersion.current
-    setLoading(true)
+    setLoadingOptions(true)
     setOptionsData(null)
     setSelectedExpiration('')
     selectedExpirationRef.current = ''
 
-    const coin = (ex: Exchange) => ex === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
-    const evtSource = new EventSource(`http://localhost:3500/api/stream/${exchange}/${coin(exchange)}`)
+    const evtSource = new EventSource(`http://localhost:3500/api/stream/combined/${selectedCrypto}`)
 
     evtSource.onmessage = (e) => {
-      if (version !== fetchVersion.current) { evtSource.close(); return }
+      if (version !== fetchVersion.current) {
+        evtSource.close()
+        return
+      }
+
       try {
         const data = JSON.parse(e.data)
         if (!data || data.error || !data.data) return
-        setOptionsData(prev => {
+
+        setOptionsData((prev) => {
           if (!prev) return data
           const mergedData = { ...prev.data }
           for (const [exp, chain] of Object.entries(data.data as Record<string, { calls: any[]; puts: any[] }>)) {
             if (prev.data[exp]) {
-              const mergeIV = (prev: any, next: any) => ({
-                ...prev, ...next,
-                markVol: next.markVol || prev?.markVol,
-                bidVol:  next.bidVol  || prev?.bidVol,
-                askVol:  next.askVol  || prev?.askVol,
+              const mergeIV = (previous: any, next: any) => ({
+                ...previous,
+                ...next,
+                markVol: next.markVol || previous?.markVol,
+                bidVol: next.bidVol || previous?.bidVol,
+                askVol: next.askVol || previous?.askVol,
               })
-              const callMap = new Map(prev.data[exp].calls.map((c: any) => [c.strike, c]))
-              for (const c of chain.calls) callMap.set(c.strike, mergeIV(callMap.get(c.strike), c))
-              const putMap = new Map(prev.data[exp].puts.map((p: any) => [p.strike, p]))
-              for (const p of chain.puts) putMap.set(p.strike, mergeIV(putMap.get(p.strike), p))
+              const callMap = new Map(prev.data[exp].calls.map((contract: any) => [contract.strike, contract]))
+              for (const contract of chain.calls) callMap.set(contract.strike, mergeIV(callMap.get(contract.strike), contract))
+              const putMap = new Map(prev.data[exp].puts.map((contract: any) => [contract.strike, contract]))
+              for (const contract of chain.puts) putMap.set(contract.strike, mergeIV(putMap.get(contract.strike), contract))
               mergedData[exp] = { calls: Array.from(callMap.values()), puts: Array.from(putMap.values()) }
             } else {
               mergedData[exp] = chain
@@ -107,8 +248,10 @@ export default function AnalysisPage() {
             expirations: data.expirations?.length ? data.expirations : prev.expirations,
           }
         })
+
         if (data.spotPrice > 0) setSpotPrice(data.spotPrice)
-        setLoading(false)
+        setLoadingOptions(false)
+
         if (data.expirations?.length > 0 && !selectedExpirationRef.current) {
           const first = filterExpirations(data.expirations)[0] ?? data.expirations[0]
           setSelectedExpiration(first)
@@ -117,400 +260,604 @@ export default function AnalysisPage() {
       } catch {}
     }
 
-    evtSource.onerror = () => { if (version !== fetchVersion.current) evtSource.close() }
-    return () => evtSource.close()
-  }, [selectedCrypto, exchange])
-
-  useEffect(() => {
-    const coinParam = exchange === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
-    let cancelled = false
-    const fetchAnalysis = () => {
-      fetch(`http://localhost:3500/api/analysis/${exchange}/${coinParam}`)
-        .then(r => r.json())
-        .then(d => {
-          if (!cancelled && d && !d.error) setAnalysisData(d)
-        })
-        .catch(() => {})
+    evtSource.onerror = () => {
+      if (version !== fetchVersion.current) evtSource.close()
     }
-    fetchAnalysis()
-    const id = setInterval(fetchAnalysis, 5000)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [exchange, selectedCrypto])
+
+    return () => evtSource.close()
+  }, [selectedCrypto])
 
   useEffect(() => {
-    setActiveSurfaceCell(null)
-  }, [analysisData?.rawSurface])
+    let cancelled = false
 
-  const handleExchangeChange = (ex: Exchange) => {
-    fetchVersion.current++
-    setExchange(ex)
-    setOptionsData(null)
-    setSelectedExpiration('')
-    selectedExpirationRef.current = ''
-    setAnalysisData(null)
-  }
+    async function fetchAllAnalysis() {
+      const results = await Promise.all(RESEARCH_EXCHANGES.map(async (exchange) => {
+        try {
+          const response = await fetch(`http://localhost:3500/api/analysis/${exchange}/${coinForExchange(exchange, selectedCrypto)}`)
+          const payload = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(payload?.error || `HTTP ${response.status}`)
+          }
+          return [exchange, { data: payload as AnalysisPayload, error: null }] as const
+        } catch (error) {
+          return [exchange, { data: null, error: error instanceof Error ? error.message : 'Unavailable' }] as const
+        }
+      }))
+
+      if (cancelled) return
+
+      const nextData = { combined: null, deribit: null, okx: null, bybit: null } as Record<ResearchExchange, AnalysisPayload | null>
+      const nextErrors = { combined: null, deribit: null, okx: null, bybit: null } as Record<ResearchExchange, string | null>
+
+      for (const [exchange, result] of results) {
+        nextData[exchange] = result.data
+        nextErrors[exchange] = result.error
+      }
+
+      setAnalysisByExchange(nextData)
+      setAnalysisErrors(nextErrors)
+      setActiveSurfaceKey(null)
+    }
+
+    fetchAllAnalysis()
+    const id = setInterval(fetchAllAnalysis, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [selectedCrypto])
 
   const expirations = useMemo(
     () => filterExpirations(optionsData?.expirations ?? []),
     [optionsData]
   )
 
-  const termStructure = analysisData?.termStructure ?? []
-  const skewData = analysisData?.skewData ?? []
-  const rawSurface = analysisData?.rawSurface ?? null
-
-  // Smile chart data: raw scatter + fitted SVI curve, merged into one array
-  const smileChartData = useMemo(() => {
-    if (!selectedExpiration || !optionsData || !spotPrice) return []
-    const chain = optionsData.data[selectedExpiration]
-    if (!chain) return []
-
-    const fitData = analysisData?.sviFits?.[selectedExpiration] ?? null
-    const T = fitData?.T ?? Math.max(1e-4, (new Date(selectedExpiration + 'T08:00:00Z').getTime() - Date.now()) / MS_PER_YEAR)
-
-    // Collect OTM raw IV points (standard: calls above spot, puts below spot)
-    const rawMap = new Map<number, { markIV: number; bidIV: number | null; askIV: number | null }>()
-    for (const c of chain.calls) {
-      const mv = c.markVol ?? 0
-      if (c.strike >= spotPrice && mv > 0)
-        rawMap.set(c.strike, { markIV: mv * 100, bidIV: c.bidVol ? c.bidVol * 100 : null, askIV: c.askVol ? c.askVol * 100 : null })
+  const visibleOverlays = OVERLAY_EXCHANGES.filter((exchange) => overlayVisibility[exchange])
+  const combinedAnalysis = analysisByExchange.combined
+  const smileChartData = useMemo(
+    () => buildSmileChartData(selectedExpiration, optionsData, spotPrice, analysisByExchange, visibleOverlays),
+    [selectedExpiration, optionsData, spotPrice, analysisByExchange, visibleOverlays]
+  )
+  const smileFits = useMemo(() => {
+    const fits: Partial<Record<ResearchExchange, NonNullable<AnalysisFit>>> = {}
+    for (const exchange of ['combined', ...visibleOverlays] as ResearchExchange[]) {
+      const fit = analysisByExchange[exchange]?.sviFits?.[selectedExpiration] ?? null
+      if (fit) fits[exchange] = fit
     }
-    for (const p of chain.puts) {
-      const mv = p.markVol ?? 0
-      if (p.strike <= spotPrice && mv > 0 && !rawMap.has(p.strike))
-        rawMap.set(p.strike, { markIV: mv * 100, bidIV: p.bidVol ? p.bidVol * 100 : null, askIV: p.askVol ? p.askVol * 100 : null })
-    }
-    const rawPoints = Array.from(rawMap.entries())
-      .map(([strike, v]) => ({ strike, ...v }))
-      .sort((a, b) => a.strike - b.strike)
-
-    type Point = { x: number; mark: number | null; bid: number | null; ask: number | null; fitted: number | null }
-
-    if (!fitData) {
-      return rawPoints.map(p => ({ x: p.strike, mark: p.markIV, bid: p.bidIV, ask: p.askIV, fitted: null })) as Point[]
-    }
-
-    const logMoneys = rawPoints.map(p => Math.log(p.strike / spotPrice))
-    const kMin = Math.min(...logMoneys) - 0.05
-    const kMax = Math.max(...logMoneys) + 0.05
-    const nPoints = 120
-    const { a, b, rho, m, sigma } = fitData.params
-    const curve: Point[] = Array.from({ length: nPoints }, (_, i) => {
-      const k = kMin + (kMax - kMin) * i / (nPoints - 1)
-      const d = k - m
-      const w = a + b * (rho * d + Math.sqrt(d * d + sigma * sigma))
-      const iv = w > 0 ? Math.sqrt(w / T) * 100 : 0
-      return { x: spotPrice * Math.exp(k), mark: null, bid: null, ask: null, fitted: iv > 0 && iv < 500 ? iv : null }
-    }).filter(p => p.fitted !== null)
-
-    return [
-      ...curve,
-      ...rawPoints.map(p => ({ x: p.strike, mark: p.markIV, bid: p.bidIV, ask: p.askIV, fitted: null })),
-    ].sort((a, b) => a.x - b.x)
-  }, [selectedExpiration, optionsData, spotPrice, analysisData])
-
-  const selectedFit = selectedExpiration ? (analysisData?.sviFits?.[selectedExpiration] ?? null) : null
-  const fmtExpiry = (exp: string) =>
-    new Date(exp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-
-  const hasIVData = smileChartData.some(d => d.mark !== null)
-  const surfaceCells = rawSurface?.cells ?? []
-  const surfaceMinIV = surfaceCells.length ? Math.min(...surfaceCells.map(cell => cell.avgMarkIV)) : 0
-  const surfaceMaxIV = surfaceCells.length ? Math.max(...surfaceCells.map(cell => cell.avgMarkIV)) : 0
-  const activeSurfaceDetails = activeSurfaceCell ?? surfaceCells[0] ?? null
-
+    return fits
+  }, [analysisByExchange, selectedExpiration, visibleOverlays])
+  const termChartData = useMemo(
+    () => buildTermStructureChartData(analysisByExchange, visibleOverlays, termMode),
+    [analysisByExchange, visibleOverlays, termMode]
+  )
+  const skewChartData = useMemo(
+    () => buildSkewChartData(analysisByExchange, visibleOverlays, skewMetric, skewMode),
+    [analysisByExchange, visibleOverlays, skewMetric, skewMode]
+  )
+  const combinedSurface = combinedAnalysis?.rawSurface ?? null
+  const comparisonSurface = useMemo<SurfaceComparison | null>(() => {
+    if (!combinedSurface || surfaceMode !== 'spread') return null
+    const venueSurface = analysisByExchange[surfaceComparisonExchange]?.rawSurface ?? null
+    return venueSurface ? buildSurfaceComparison(combinedSurface, venueSurface) : null
+  }, [combinedSurface, analysisByExchange, surfaceComparisonExchange, surfaceMode])
+  const surfaceData = surfaceMode === 'spread' ? comparisonSurface : combinedSurface
+  const surfaceCells = surfaceData?.cells ?? []
   const surfaceCellMap = useMemo(() => {
-    const map = new Map<string, (typeof surfaceCells)[number]>()
+    const map = new Map<string, SurfaceCell | SurfaceComparisonCell>()
     for (const cell of surfaceCells) {
       map.set(`${cell.bucketKey}|${cell.exp}`, cell)
     }
     return map
   }, [surfaceCells])
+  const activeSurfaceDetails = activeSurfaceKey ? surfaceCellMap.get(activeSurfaceKey) ?? null : surfaceCells[0] ?? null
+  const selectedFit = smileFits.combined ?? null
+  const hasSmileData = smileChartData.some((row) => row.mark !== null)
 
-  const colorForSurfaceCell = (iv: number) => {
-    if (surfaceMaxIV <= surfaceMinIV) return 'rgba(59, 130, 246, 0.28)'
+  const freshnessByExchange = useMemo(() => {
+    return RESEARCH_EXCHANGES.reduce((acc, exchange) => {
+      acc[exchange] = getDatasetFreshness(analysisByExchange[exchange]?.updatedAt ?? null)
+      return acc
+    }, {} as Record<ResearchExchange, ReturnType<typeof getDatasetFreshness>>)
+  }, [analysisByExchange])
 
-    const ratio = Math.max(0, Math.min(1, (iv - surfaceMinIV) / (surfaceMaxIV - surfaceMinIV)))
+  const surfaceValueRange = useMemo(() => {
+    if (!surfaceCells.length) return { min: 0, max: 0 }
+    const values = surfaceCells
+      .map((cell) => surfaceMode === 'spread' ? (cell as SurfaceComparisonCell).spread : cell.avgMarkIV)
+      .filter((value): value is number => value !== null && value !== undefined)
+    if (!values.length) return { min: 0, max: 0 }
+    return { min: Math.min(...values), max: Math.max(...values) }
+  }, [surfaceCells, surfaceMode])
+
+  const colorForSurfaceCell = (cell: SurfaceCell | SurfaceComparisonCell | null) => {
+    if (!cell) return 'rgba(148, 163, 184, 0.08)'
+
+    if (surfaceMode === 'spread') {
+      const spread = (cell as SurfaceComparisonCell).spread
+      if (spread === null) return 'rgba(148, 163, 184, 0.08)'
+      const limit = Math.max(Math.abs(surfaceValueRange.min), Math.abs(surfaceValueRange.max), 0.5)
+      const ratio = Math.min(1, Math.abs(spread) / limit)
+      const lightness = 94 - ratio * 34
+      if (spread >= 0) return `hsl(8 78% ${lightness.toFixed(0)}%)`
+      return `hsl(208 78% ${lightness.toFixed(0)}%)`
+    }
+
+    if (surfaceValueRange.max <= surfaceValueRange.min) return 'rgba(59, 130, 246, 0.28)'
+    const ratio = Math.max(0, Math.min(1, (cell.avgMarkIV - surfaceValueRange.min) / (surfaceValueRange.max - surfaceValueRange.min)))
     const hue = 212 - ratio * 164
     const lightness = 92 - ratio * 42
     return `hsl(${hue.toFixed(0)} 78% ${lightness.toFixed(0)}%)`
   }
 
+  const toggleOverlay = (exchange: OverlayExchange) => {
+    setOverlayVisibility((previous) => ({ ...previous, [exchange]: !previous[exchange] }))
+  }
+
+  const fmtExpiry = (exp: string) => new Date(exp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const formatSurfaceLegend = surfaceMode === 'spread'
+    ? `${surfaceValueRange.min.toFixed(1)} to ${surfaceValueRange.max.toFixed(1)} vol pts`
+    : `${surfaceValueRange.min.toFixed(1)}% to ${surfaceValueRange.max.toFixed(1)}% IV`
+
   return (
     <div className="min-h-screen bg-surface">
-      <Header exchange={exchange} onExchangeChange={handleExchangeChange} />
+      <Header exchange="combined" onExchangeChange={() => {}} hideExchangeSelector />
 
       <main className="container mx-auto px-4 py-4 space-y-4">
-
-        {/* Coin + Expiry selectors */}
-        <div className="flex items-start gap-3 flex-wrap">
-          <div className="flex gap-1 flex-shrink-0">
-            {(['BTC', 'ETH', 'SOL'] as const).map(c => (
-              <button
-                key={c}
-                onClick={() => {
-                  setSelectedCrypto(c)
-                  setOptionsData(null)
-                  setSelectedExpiration('')
-                  selectedExpirationRef.current = ''
-                  setAnalysisData(null)
-                }}
-                className={classNames('px-3 py-1 rounded text-xs font-medium transition-colors border', {
-                  'bg-tone text-white border-tone': selectedCrypto === c,
-                  'text-ink-2 border-rim hover:text-ink hover:border-ink-3': selectedCrypto !== c,
-                })}
-              >{c}</button>
-            ))}
+        <div className="card space-y-4">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h1 className="text-sm font-semibold text-ink">Volatility Research Dashboard</h1>
+              <p className="text-xs text-ink-3 mt-1">
+                Combined is the market anchor. Use venue overlays to compare smile, tenor, skew, and surface dislocations.
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {RESEARCH_EXCHANGES.map((exchange) => {
+                const freshness = freshnessByExchange[exchange]
+                return (
+                  <div
+                    key={exchange}
+                    className={classNames('rounded border px-2 py-1 text-[11px]', EX_SOFT[exchange], {
+                      'border-rose-200 text-rose-700 dark:text-rose-400': freshness.status === 'stale' || analysisErrors[exchange],
+                      'opacity-70': freshness.status === 'aging',
+                      'opacity-55': freshness.status === 'missing' && !analysisErrors[exchange],
+                    })}
+                  >
+                    <span className="font-medium">{EX_NAME[exchange]}</span> · {analysisErrors[exchange] ? 'Unavailable' : freshness.label}
+                  </div>
+                )
+              })}
+            </div>
           </div>
-          <div className="flex flex-wrap gap-1 flex-1 min-w-0">
-            {expirations.map(exp => (
+
+          <div className="flex items-start gap-3 flex-wrap">
+            <div className="flex gap-1 flex-shrink-0">
+              {(['BTC', 'ETH', 'SOL'] as const).map((coin) => (
+                <button
+                  key={coin}
+                  onClick={() => {
+                    setSelectedCrypto(coin)
+                    setSelectedExpiration('')
+                    selectedExpirationRef.current = ''
+                    setActiveSurfaceKey(null)
+                  }}
+                  className={classNames('px-3 py-1 rounded text-xs font-medium transition-colors border', {
+                    'bg-tone text-white border-tone': selectedCrypto === coin,
+                    'text-ink-2 border-rim hover:text-ink hover:border-ink-3': selectedCrypto !== coin,
+                  })}
+                >
+                  {coin}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="text-[11px] font-medium uppercase tracking-[0.14em] text-ink-3">Overlays</div>
+                  {OVERLAY_EXCHANGES.map((exchange) => (
+                <button
+                  key={exchange}
+                  onClick={() => toggleOverlay(exchange)}
+                  className={classNames('px-2.5 py-1 rounded text-[11px] border transition-colors', {
+                    [EX_ACTIVE[exchange]]: overlayVisibility[exchange],
+                    'text-ink-2 border-rim hover:text-ink hover:border-ink-3': !overlayVisibility[exchange],
+                  })}
+                >
+                  {EX_NAME[exchange]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-1">
+            {expirations.map((exp) => (
               <button
                 key={exp}
-                onClick={() => { selectedExpirationRef.current = exp; setSelectedExpiration(exp) }}
+                onClick={() => {
+                  selectedExpirationRef.current = exp
+                  setSelectedExpiration(exp)
+                }}
                 className={classNames('px-2 py-0.5 rounded text-[10px] font-mono border transition-colors', {
                   'bg-tone text-white border-tone': selectedExpiration === exp,
                   'text-ink-2 border-rim hover:border-ink-3 hover:text-ink': selectedExpiration !== exp,
                 })}
-              >{fmtExpiry(exp)}</button>
+              >
+                {fmtExpiry(exp)}
+              </button>
             ))}
           </div>
         </div>
 
-        {loading ? (
+        {loadingOptions ? (
           <div className="card flex items-center justify-center h-64">
-            <p className="text-ink-2 text-sm">Loading…</p>
+            <p className="text-ink-2 text-sm">Loading combined market data…</p>
           </div>
         ) : (
           <>
-            {/* IV Smile */}
-            <div className="card">
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h2 className="text-sm font-semibold text-ink">
-                    IV Smile — {selectedExpiration ? fmtExpiry(selectedExpiration) : '—'}
-                  </h2>
-                  <p className="text-xs text-ink-3 mt-0.5">
-                    {selectedFit
-                      ? `SVI fitted curve · RMSE ${(selectedFit.rmse * 100).toFixed(4)}`
-                      : hasIVData
-                        ? 'Raw mark IV · SVI fit requires ≥5 data points'
-                        : 'No IV data — use Deribit, OKX, or Combined'}
-                  </p>
-                </div>
-                {selectedFit && (
-                  <div className="flex gap-3 text-[11px] font-mono text-ink-3 flex-shrink-0">
-                    <span title="Skew correlation">ρ = {selectedFit.params.rho.toFixed(3)}</span>
-                    <span title="Wing slope">b = {selectedFit.params.b.toFixed(4)}</span>
-                    <span title="Curvature">σ = {selectedFit.params.sigma.toFixed(4)}</span>
-                    <span title="ATM shift">m = {selectedFit.params.m.toFixed(4)}</span>
-                  </div>
-                )}
-              </div>
-
-              {!hasIVData && !loading ? (
-                <div className="flex items-center justify-center h-64 text-sm text-ink-3">
-                  No IV data — switch to Deribit, OKX, or Combined
-                </div>
-              ) : (
-                <ResponsiveContainer width="100%" height={320}>
-                  <LineChart data={smileChartData} margin={{ top: 5, right: 24, left: 0, bottom: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-rim, #e5e7eb)" />
-                    <XAxis
-                      dataKey="x"
-                      type="number"
-                      scale="linear"
-                      domain={['dataMin', 'dataMax']}
-                      tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)}
-                      tick={{ fontSize: 11 }}
-                      label={{ value: 'Strike', position: 'insideBottom', offset: -10, fontSize: 11 }}
-                    />
-                    <YAxis
-                      tickFormatter={v => `${Number(v).toFixed(0)}%`}
-                      tick={{ fontSize: 11 }}
-                      width={44}
-                      label={{ value: 'IV', angle: -90, position: 'insideLeft', offset: 10, fontSize: 11 }}
-                    />
-                    <Tooltip
-                      formatter={(v: any, name: string) => [`${parseFloat(v).toFixed(2)}%`, name]}
-                      labelFormatter={v => `Strike: ${Number(v).toLocaleString()}`}
-                      contentStyle={{ fontSize: 11 }}
-                    />
-                    <ReferenceLine
-                      x={spotPrice}
-                      stroke="var(--color-tone, #f59e0b)"
-                      strokeDasharray="4 2"
-                      strokeWidth={1.5}
-                      label={{ value: 'Spot', position: 'top', fontSize: 10 }}
-                    />
-                    {/* SVI fitted curve */}
-                    <Line dataKey="fitted" name="SVI Fit" connectNulls dot={false}
-                      strokeWidth={2} stroke="#8b5cf6" isAnimationActive={false} />
-                    {/* Bid/Ask spread as faint dots */}
-                    <Line dataKey="bid" name="Bid IV" connectNulls={false} strokeWidth={0}
-                      dot={{ r: 3, fill: '#d1d5db', stroke: '#9ca3af', strokeWidth: 1 }} activeDot={{ r: 4 }}
-                      isAnimationActive={false} />
-                    <Line dataKey="ask" name="Ask IV" connectNulls={false} strokeWidth={0}
-                      dot={{ r: 3, fill: '#d1d5db', stroke: '#9ca3af', strokeWidth: 1 }} activeDot={{ r: 4 }}
-                      isAnimationActive={false} />
-                    {/* Mark IV as solid dots */}
-                    <Line dataKey="mark" name="Mark IV" connectNulls={false} strokeWidth={0}
-                      dot={{ r: 5, fill: '#3b82f6', stroke: '#fff', strokeWidth: 1.5 }} activeDot={{ r: 6 }}
-                      isAnimationActive={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            {/* Term Structure + Skew side by side */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-              {/* ATM IV Term Structure */}
+            <div className="mx-auto w-full max-w-5xl">
               <div className="card">
-                <h2 className="text-sm font-semibold text-ink mb-0.5">ATM IV Term Structure</h2>
-                <p className="text-xs text-ink-3 mb-4">
-                  SVI ATM implied volatility at k=0 across expiries
-                </p>
-                {termStructure.length < 2 ? (
-                  <div className="flex items-center justify-center h-48 text-sm text-ink-3">
-                    Need at least 2 expiries with data
+                <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+                  <div>
+                    <h2 className="text-sm font-semibold text-ink">
+                      IV Smile Comparison — {selectedExpiration ? fmtExpiry(selectedExpiration) : '—'}
+                    </h2>
+                    <p className="text-xs text-ink-3 mt-0.5">
+                      Combined raw OTM IV anchors the chart. Venue overlays show where fitted curves diverge from market consensus.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-3 text-[11px] text-ink-3">
+                    {(['combined', ...visibleOverlays] as ResearchExchange[]).map((exchange) => {
+                      const fit = smileFits[exchange]
+                      return (
+                        <span key={exchange}>
+                          <span className="font-medium" style={{ color: EXCHANGE_COLORS[exchange] }}>
+                            {EX_NAME[exchange]}
+                          </span>{' '}
+                          {fit ? `RMSE ${(fit.rmse * 100).toFixed(3)}` : 'no fit'}
+                        </span>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {!hasSmileData ? (
+                  <div className="flex items-center justify-center h-72 text-sm text-ink-3">
+                    Combined smile data is still warming up.
                   </div>
                 ) : (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <LineChart data={termStructure} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                  <ResponsiveContainer width="100%" height={340}>
+                    <LineChart data={smileChartData} margin={{ top: 5, right: 24, left: 0, bottom: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--color-rim, #e5e7eb)" />
-                      <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                      <YAxis
-                        tickFormatter={v => `${Number(v).toFixed(0)}%`}
+                      <XAxis
+                        dataKey="x"
+                        type="number"
+                        scale="linear"
+                        domain={['dataMin', 'dataMax']}
+                        tickFormatter={(value) => value >= 1000 ? `${(value / 1000).toFixed(0)}k` : String(value)}
                         tick={{ fontSize: 11 }}
-                        width={40}
+                        label={{ value: 'Strike', position: 'insideBottom', offset: -10, fontSize: 11 }}
+                      />
+                      <YAxis
+                        tickFormatter={(value) => `${Number(value).toFixed(0)}%`}
+                        tick={{ fontSize: 11 }}
+                        width={44}
+                        label={{ value: 'IV', angle: -90, position: 'insideLeft', offset: 10, fontSize: 11 }}
                       />
                       <Tooltip
-                        formatter={(v: any) => [`${parseFloat(v).toFixed(1)}%`, 'ATM IV']}
+                        formatter={(value: any, name: string) => {
+                          if (value == null) return [null, name]
+                          const cleanName = name.startsWith('fit_') ? `${name.replace('fit_', '')} fit` : name
+                          return [`${parseFloat(value).toFixed(2)}%`, cleanName]
+                        }}
+                        labelFormatter={(value) => `Strike: ${Number(value).toLocaleString()}`}
                         contentStyle={{ fontSize: 11 }}
                       />
+                      <ReferenceLine
+                        x={spotPrice}
+                        stroke="var(--color-tone, #f59e0b)"
+                        strokeDasharray="4 2"
+                        strokeWidth={1.5}
+                        label={{ value: 'Spot', position: 'top', fontSize: 10 }}
+                      />
+                      {(['combined', ...visibleOverlays] as ResearchExchange[]).map((exchange) => (
+                        <Line
+                          key={exchange}
+                          dataKey={`fit_${exchange}`}
+                          name={`fit_${exchange}`}
+                          connectNulls
+                          dot={false}
+                          strokeWidth={exchange === 'combined' ? 2.5 : 1.75}
+                          stroke={EXCHANGE_COLORS[exchange]}
+                          strokeDasharray={exchange === 'combined' ? undefined : '4 2'}
+                          isAnimationActive={false}
+                        />
+                      ))}
                       <Line
-                        dataKey="atmIV" name="ATM IV"
-                        stroke="#8b5cf6" strokeWidth={2}
-                        dot={{ r: 4, fill: '#8b5cf6', strokeWidth: 0 }}
-                        activeDot={{ r: 5 }}
+                        dataKey="bid"
+                        name="Bid IV"
+                        connectNulls={false}
+                        strokeWidth={0}
+                        dot={{ r: 3, fill: '#d1d5db', stroke: '#9ca3af', strokeWidth: 1 }}
+                        activeDot={{ r: 4 }}
+                        isAnimationActive={false}
+                      />
+                      <Line
+                        dataKey="ask"
+                        name="Ask IV"
+                        connectNulls={false}
+                        strokeWidth={0}
+                        dot={{ r: 3, fill: '#d1d5db', stroke: '#9ca3af', strokeWidth: 1 }}
+                        activeDot={{ r: 4 }}
+                        isAnimationActive={false}
+                      />
+                      <Line
+                        dataKey="mark"
+                        name="Combined mark IV"
+                        connectNulls={false}
+                        strokeWidth={0}
+                        dot={{ r: 5, fill: '#3b82f6', stroke: '#fff', strokeWidth: 1.5 }}
+                        activeDot={{ r: 6 }}
                         isAnimationActive={false}
                       />
                     </LineChart>
                   </ResponsiveContainer>
                 )}
               </div>
+            </div>
 
-              {/* 25Δ Skew & Butterfly */}
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
               <div className="card">
-                <h2 className="text-sm font-semibold text-ink mb-0.5">25Δ Skew &amp; Butterfly</h2>
-                <p className="text-xs text-ink-3 mb-4">
-                  Risk reversal = call₂₅ − put₂₅ · Fly = (call₂₅ + put₂₅)/2 − ATM · requires Greeks
-                </p>
-                {skewData.length === 0 ? (
-                  <div className="flex items-center justify-center h-48 text-sm text-ink-3">
-                    Delta data required — use Deribit, OKX, or Combined
+                <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+                  <div>
+                    <h2 className="text-sm font-semibold text-ink">ATM IV Term Structure</h2>
+                    <p className="text-xs text-ink-3 mt-0.5">
+                      Compare venue ATM IV levels or spreads versus combined across tenor.
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    {(['level', 'spread'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setTermMode(mode)}
+                        className={classNames('px-2 py-1 rounded text-[11px] border transition-colors', {
+                          'bg-tone text-white border-tone': termMode === mode,
+                          'text-ink-2 border-rim hover:text-ink hover:border-ink-3': termMode !== mode,
+                        })}
+                      >
+                        {mode === 'level' ? 'Level' : 'Spread'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {termChartData.length < 2 ? (
+                  <div className="flex items-center justify-center h-56 text-sm text-ink-3">
+                    Need at least two combined expiries with ATM IV data.
                   </div>
                 ) : (
-                  <ResponsiveContainer width="100%" height={220}>
-                    <BarChart data={skewData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={termChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--color-rim, #e5e7eb)" />
                       <XAxis dataKey="label" tick={{ fontSize: 10 }} />
-                      <YAxis
-                        tickFormatter={v => `${Number(v).toFixed(1)}%`}
-                        tick={{ fontSize: 11 }}
-                        width={40}
-                      />
+                      <YAxis tickFormatter={(value) => `${Number(value).toFixed(1)}%`} tick={{ fontSize: 11 }} width={42} />
                       <Tooltip
-                        formatter={(v: any, name: string) => [`${parseFloat(v).toFixed(2)}%`, name]}
+                        formatter={(value: any, name: string) => [
+                          `${parseFloat(value).toFixed(2)}${termMode === 'spread' ? ' vol pts' : '%'}`,
+                          name,
+                        ]}
                         contentStyle={{ fontSize: 11 }}
                       />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
                       <ReferenceLine y={0} stroke="var(--color-rim, #e5e7eb)" />
-                      <Bar dataKey="rr" name="25Δ RR" fill="#38bdf8" radius={[2, 2, 0, 0]} isAnimationActive={false} />
-                      <Bar dataKey="bf" name="25Δ Fly" fill="#34d399" radius={[2, 2, 0, 0]} isAnimationActive={false} />
-                    </BarChart>
+                      {(['combined', ...visibleOverlays] as ResearchExchange[]).map((exchange) => (
+                        <Line
+                          key={exchange}
+                          dataKey={exchange}
+                          stroke={EXCHANGE_COLORS[exchange]}
+                          strokeWidth={exchange === 'combined' ? 2.5 : 1.75}
+                          strokeDasharray={exchange === 'combined' ? undefined : '4 2'}
+                          dot={{ r: exchange === 'combined' ? 4 : 3, strokeWidth: 0 }}
+                          connectNulls={false}
+                          isAnimationActive={false}
+                        />
+                      ))}
+                    </LineChart>
                   </ResponsiveContainer>
                 )}
               </div>
 
+              <div className="card">
+                <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
+                  <div>
+                    <h2 className="text-sm font-semibold text-ink">25Δ Skew &amp; Butterfly</h2>
+                    <p className="text-xs text-ink-3 mt-0.5">
+                      Toggle between risk reversal and fly, then compare outright levels or spreads versus combined.
+                    </p>
+                  </div>
+                  <div className="flex gap-3 flex-wrap">
+                    <div className="flex gap-1">
+                      {(['rr', 'bf'] as const).map((metric) => (
+                        <button
+                          key={metric}
+                          onClick={() => setSkewMetric(metric)}
+                          className={classNames('px-2 py-1 rounded text-[11px] border transition-colors', {
+                            'bg-tone text-white border-tone': skewMetric === metric,
+                            'text-ink-2 border-rim hover:text-ink hover:border-ink-3': skewMetric !== metric,
+                          })}
+                        >
+                          {metric === 'rr' ? '25Δ RR' : '25Δ Fly'}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex gap-1">
+                      {(['level', 'spread'] as const).map((mode) => (
+                        <button
+                          key={mode}
+                          onClick={() => setSkewMode(mode)}
+                          className={classNames('px-2 py-1 rounded text-[11px] border transition-colors', {
+                            'bg-tone text-white border-tone': skewMode === mode,
+                            'text-ink-2 border-rim hover:text-ink hover:border-ink-3': skewMode !== mode,
+                          })}
+                        >
+                          {mode === 'level' ? 'Level' : 'Spread'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+                {skewChartData.length === 0 ? (
+                  <div className="flex items-center justify-center h-56 text-sm text-ink-3">
+                    Combined skew data is unavailable for the selected coin.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={skewChartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--color-rim, #e5e7eb)" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                      <YAxis tickFormatter={(value) => `${Number(value).toFixed(1)}%`} tick={{ fontSize: 11 }} width={42} />
+                      <Tooltip
+                        formatter={(value: any, name: string) => [
+                          `${parseFloat(value).toFixed(2)}${skewMode === 'spread' ? ' vol pts' : '%'}`,
+                          name,
+                        ]}
+                        contentStyle={{ fontSize: 11 }}
+                      />
+                      <Legend wrapperStyle={{ fontSize: 11 }} />
+                      <ReferenceLine y={0} stroke="var(--color-rim, #e5e7eb)" />
+                      {(['combined', ...visibleOverlays] as ResearchExchange[]).map((exchange) => (
+                        <Line
+                          key={exchange}
+                          dataKey={exchange}
+                          stroke={EXCHANGE_COLORS[exchange]}
+                          strokeWidth={exchange === 'combined' ? 2.5 : 1.75}
+                          strokeDasharray={exchange === 'combined' ? undefined : '4 2'}
+                          dot={{ r: exchange === 'combined' ? 4 : 3, strokeWidth: 0 }}
+                          connectNulls={false}
+                          isAnimationActive={false}
+                        />
+                      ))}
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
             </div>
 
             <div className="card">
-              <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
                 <div>
-                  <h2 className="text-sm font-semibold text-ink">Raw IV Surface</h2>
+                  <h2 className="text-sm font-semibold text-ink">Surface Research View</h2>
                   <p className="text-xs text-ink-3 mt-0.5">
-                    OTM mark IV bucketed by moneyness in the backend
+                    {surfaceMode === 'level'
+                      ? 'Combined raw OTM IV across tenor and moneyness.'
+                      : `${surfaceComparisonExchange.toUpperCase()} minus combined, in vol points.`}
                   </p>
                 </div>
-                {activeSurfaceDetails && (
-                  <div className="text-[11px] text-ink-3 text-right">
-                    <div className="font-medium text-ink">
-                      {activeSurfaceDetails.label} · {activeSurfaceDetails.bucketLabel}
-                    </div>
-                    <div>
-                      {activeSurfaceDetails.avgMarkIV.toFixed(1)}% IV · {activeSurfaceDetails.count} contract{activeSurfaceDetails.count === 1 ? '' : 's'}
-                    </div>
-                    <div>
-                      Strikes {activeSurfaceDetails.minStrike.toLocaleString()}-{activeSurfaceDetails.maxStrike.toLocaleString()}
-                    </div>
+                <div className="flex gap-3 flex-wrap">
+                  <div className="flex gap-1">
+                    {(['level', 'spread'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        onClick={() => setSurfaceMode(mode)}
+                        className={classNames('px-2 py-1 rounded text-[11px] border transition-colors', {
+                          'bg-tone text-white border-tone': surfaceMode === mode,
+                          'text-ink-2 border-rim hover:text-ink hover:border-ink-3': surfaceMode !== mode,
+                        })}
+                      >
+                        {mode === 'level' ? 'Combined' : 'Spread'}
+                      </button>
+                    ))}
                   </div>
-                )}
+                  {surfaceMode === 'spread' && (
+                    <div className="flex gap-1">
+                      {OVERLAY_EXCHANGES.map((exchange) => (
+                        <button
+                          key={exchange}
+                          onClick={() => setSurfaceComparisonExchange(exchange)}
+                          className={classNames('px-2 py-1 rounded text-[11px] border transition-colors', {
+                            [EX_ACTIVE[exchange]]: surfaceComparisonExchange === exchange,
+                            'text-ink-2 border-rim hover:text-ink hover:border-ink-3': surfaceComparisonExchange !== exchange,
+                          })}
+                        >
+                          {EX_NAME[exchange]}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
-              {!rawSurface || rawSurface.expiries.length === 0 || rawSurface.buckets.length === 0 || rawSurface.cells.length === 0 ? (
+              {activeSurfaceDetails && (
+                <div className="mb-4 text-[11px] text-ink-3">
+                  <div className="font-medium text-ink">
+                    {activeSurfaceDetails.label} · {activeSurfaceDetails.bucketLabel}
+                  </div>
+                  {surfaceMode === 'level' ? (
+                    <div>
+                      {activeSurfaceDetails.avgMarkIV.toFixed(1)}% IV · {activeSurfaceDetails.count} contract{activeSurfaceDetails.count === 1 ? '' : 's'} · strikes{' '}
+                      {activeSurfaceDetails.minStrike.toLocaleString()}-{activeSurfaceDetails.maxStrike.toLocaleString()}
+                    </div>
+                  ) : (
+                    <div>
+                      Combined {activeSurfaceDetails.avgMarkIV.toFixed(1)}% · {surfaceComparisonExchange.toUpperCase()}{' '}
+                      {(activeSurfaceDetails as SurfaceComparisonCell).venueAvgMarkIV?.toFixed(1) ?? '—'}% · spread{' '}
+                      {(activeSurfaceDetails as SurfaceComparisonCell).spread?.toFixed(1) ?? '—'} vol pts
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!surfaceData || surfaceData.expiries.length === 0 || surfaceData.buckets.length === 0 || surfaceData.cells.length === 0 ? (
                 <div className="flex items-center justify-center h-56 text-sm text-ink-3">
-                  No raw IV surface data available
+                  No surface data available for the current mode.
                 </div>
               ) : (
                 <div className="space-y-3">
                   <div className="overflow-x-auto">
                     <div
-                      className="grid gap-1 min-w-[640px]"
-                      style={{ gridTemplateColumns: `88px repeat(${rawSurface.expiries.length}, minmax(40px, 1fr))` }}
+                      className="grid gap-1 min-w-[720px]"
+                      style={{ gridTemplateColumns: `88px repeat(${surfaceData.expiries.length}, minmax(44px, 1fr))` }}
                     >
-                      <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-ink-3 px-2 py-1">
-                        Mny
-                      </div>
-                      {rawSurface.expiries.map(expiry => (
+                      <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-ink-3 px-2 py-1">Mny</div>
+                      {surfaceData.expiries.map((expiry) => (
                         <div key={expiry.exp} className="px-1 py-1 text-center">
                           <div className="text-[11px] font-medium text-ink">{expiry.label}</div>
                           <div className="text-[10px] text-ink-3">{expiry.dte}d</div>
                         </div>
                       ))}
 
-                      {rawSurface.buckets.slice().reverse().map(bucket => (
-                        <div
-                          key={`row-${bucket.key}`}
-                          className="contents"
-                        >
-                          <div
-                            className="flex items-center justify-end pr-2 text-[11px] text-ink-3"
-                          >
-                            {bucket.label}
-                          </div>
-                          {rawSurface.expiries.map(expiry => {
-                            const cell = surfaceCellMap.get(`${bucket.key}|${expiry.exp}`) ?? null
+                      {surfaceData.buckets.slice().reverse().map((bucket) => (
+                        <div key={`row-${bucket.key}`} className="contents">
+                          <div className="flex items-center justify-end pr-2 text-[11px] text-ink-3">{bucket.label}</div>
+                          {surfaceData.expiries.map((expiry) => {
+                            const key = `${bucket.key}|${expiry.exp}`
+                            const cell = surfaceCellMap.get(key) ?? null
+                            const lowConfidence = cell ? cell.count <= 1 : false
+
                             return (
                               <button
-                                key={`${bucket.key}-${expiry.exp}`}
+                                key={key}
                                 type="button"
-                                onMouseEnter={() => cell && setActiveSurfaceCell(cell)}
-                                onFocus={() => cell && setActiveSurfaceCell(cell)}
-                                className="h-8 rounded border transition-colors"
+                                onMouseEnter={() => setActiveSurfaceKey(key)}
+                                onFocus={() => setActiveSurfaceKey(key)}
+                                className={classNames('h-8 rounded border transition-colors', {
+                                  'opacity-60': lowConfidence,
+                                })}
                                 style={{
-                                  backgroundColor: cell ? colorForSurfaceCell(cell.avgMarkIV) : 'rgba(148, 163, 184, 0.08)',
+                                  backgroundColor: colorForSurfaceCell(cell),
                                   borderColor: cell ? 'rgba(255, 255, 255, 0.18)' : 'rgba(148, 163, 184, 0.12)',
                                 }}
-                                aria-label={cell
-                                  ? `${expiry.label} ${bucket.label} ${cell.avgMarkIV.toFixed(1)} percent implied volatility`
-                                  : `${expiry.label} ${bucket.label} no data`}
-                                title={cell
-                                  ? `${expiry.label} · ${bucket.label} · ${cell.avgMarkIV.toFixed(1)}% IV · ${cell.count} contract${cell.count === 1 ? '' : 's'}`
-                                  : `${expiry.label} · ${bucket.label} · no data`}
+                                title={
+                                  !cell
+                                    ? `${expiry.label} · ${bucket.label} · no data`
+                                    : surfaceMode === 'level'
+                                      ? `${expiry.label} · ${bucket.label} · ${cell.avgMarkIV.toFixed(1)}% IV`
+                                      : `${expiry.label} · ${bucket.label} · ${(cell as SurfaceComparisonCell).spread?.toFixed(1) ?? '—'} vol pts`
+                                }
                               >
                                 <span className="sr-only">
-                                  {cell ? `${cell.avgMarkIV.toFixed(1)}% IV` : 'No data'}
+                                  {!cell
+                                    ? 'No data'
+                                    : surfaceMode === 'level'
+                                      ? `${cell.avgMarkIV.toFixed(1)} percent implied volatility`
+                                      : `${(cell as SurfaceComparisonCell).spread?.toFixed(1) ?? 'No'} vol point spread`}
                                 </span>
                               </button>
                             )
@@ -520,18 +867,13 @@ export default function AnalysisPage() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between gap-3 text-[11px] text-ink-3">
+                  <div className="flex items-center justify-between gap-3 text-[11px] text-ink-3 flex-wrap">
                     <div>
-                      Hover a cell to inspect expiry, moneyness, IV, and strike range.
+                      {surfaceMode === 'level'
+                        ? 'Hover a cell to inspect combined IV and strike coverage.'
+                        : 'Hover a cell to inspect combined IV, venue IV, and spread to combined.'}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span>{surfaceMinIV.toFixed(1)}%</span>
-                      <div
-                        className="h-2 w-28 rounded-full"
-                        style={{ background: 'linear-gradient(90deg, hsl(212 78% 92%), hsl(48 78% 72%), hsl(18 78% 50%))' }}
-                      />
-                      <span>{surfaceMaxIV.toFixed(1)}%</span>
-                    </div>
+                    <div>{formatSurfaceLegend}</div>
                   </div>
                 </div>
               )}

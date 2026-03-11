@@ -78,7 +78,7 @@ export interface StrategyLeg {
 
 export const CONTRACT_SIZES: Record<string, Record<string, number>> = {
   bybit:   { BTC: 1, ETH: 1, SOL: 1 },
-  okx:     { BTC: 0.1, ETH: 1, SOL: 1 },
+  okx:     { BTC: 0.01, ETH: 0.1, SOL: 1 },
   combined:{ BTC: 1, ETH: 1, SOL: 1 },
   deribit: { BTC: 1, ETH: 1, SOL: 1 },
   derive:  { BTC: 1, ETH: 1, SOL: 1 },

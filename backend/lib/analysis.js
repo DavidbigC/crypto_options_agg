@@ -19,7 +19,7 @@ function formatBucketLabel(bucketCenter) {
   if (Math.abs(bucketCenter) < RAW_SURFACE_BUCKET_STEP / 2) return 'ATM'
 
   const pct = (Math.exp(bucketCenter) - 1) * 100
-  const rounded = Math.round(pct / 5) * 5
+  const rounded = Math.round(pct)
   return `${rounded > 0 ? '+' : ''}${rounded}%`
 }
 

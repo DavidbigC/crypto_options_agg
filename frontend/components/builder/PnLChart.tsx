@@ -69,16 +69,33 @@ function computePositionGreeks(legs: Leg[], spot: number, sliderDays: number, iv
   }, { delta: 0, gamma: 0, theta: 0, vega: 0 })
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label, sliderLabel }: any) => {
   if (!active || !payload?.length) return null
+  const seen = new Set<string>()
+  const entries = payload.filter((p: any) =>
+    p.value != null && !seen.has(p.name) && seen.add(p.name)
+  )
+  const data = payload[0]?.payload
+  const hasGreeks = data?.g_delta != null
   return (
-    <div className="bg-card border border-rim rounded shadow-sm px-3 py-2 text-xs">
+    <div className="bg-card border border-rim rounded shadow-sm px-3 py-2 text-xs min-w-[170px]">
       <div className="font-mono text-ink mb-1">${Number(label).toLocaleString()}</div>
-      {payload.map((p: any) => (
+      {entries.map((p: any) => (
         <div key={p.name} style={{ color: p.color }}>
           {p.name}: <span className="font-semibold">{p.value >= 0 ? '+' : ''}{p.value.toFixed(0)} USD</span>
         </div>
       ))}
+      {hasGreeks && (
+        <div className="border-t border-rim mt-1.5 pt-1.5 space-y-0.5">
+          <div className="grid grid-cols-2 gap-x-4 font-mono">
+            <span className="text-ink-3">Δ <span className={`font-semibold ${data.g_delta >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{data.g_delta >= 0 ? '+' : ''}{data.g_delta.toFixed(4)}</span></span>
+            <span className="text-ink-3">Γ <span className="font-semibold text-violet-600 dark:text-violet-400">{data.g_gamma.toFixed(5)}</span></span>
+            <span className="text-ink-3">Θ <span className={`font-semibold ${data.g_theta >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>{data.g_theta >= 0 ? '+' : ''}{data.g_theta.toFixed(2)}</span></span>
+            <span className="text-ink-3">Ψ <span className="font-semibold text-blue-600 dark:text-blue-400">{data.g_vega >= 0 ? '+' : ''}{data.g_vega.toFixed(2)}</span></span>
+          </div>
+          <div className="text-[9px] text-ink-3">{sliderLabel}</div>
+        </div>
+      )}
     </div>
   )
 }
@@ -93,6 +110,18 @@ function computeGreeksProfile(legs: Leg[], prices: number[], sliderDays: number,
       deltaS:  parseFloat(gs.delta.toFixed(3)),
       gamma0:  parseFloat(g0.gamma.toFixed(5)),
       gammaS:  parseFloat(gs.gamma.toFixed(5)),
+    }
+  })
+}
+
+function computeGreeksAtPrice(legs: Leg[], prices: number[], sliderDays: number, ivMult: number) {
+  return prices.map(S => {
+    const g = computePositionGreeks(legs, S, sliderDays, ivMult)
+    return {
+      g_delta: parseFloat(g.delta.toFixed(4)),
+      g_gamma: parseFloat(g.gamma.toFixed(6)),
+      g_theta: parseFloat(g.theta.toFixed(2)),
+      g_vega:  parseFloat(g.vega.toFixed(2)),
     }
   })
 }
@@ -130,16 +159,26 @@ export default function PnLChart({ legs, spotPrice }: PnLChartProps) {
   const todayPnL    = useMemo(() => computePnL(legs, prices, 0,         ivMult, feesApplied, spotPrice), [legs, prices, ivMult, feesApplied, spotPrice])
   const sliderPnL   = useMemo(() => computePnL(legs, prices, sliderDays, ivMult, feesApplied, spotPrice), [legs, prices, sliderDays, ivMult, feesApplied, spotPrice])
   const expiryPnL   = useMemo(() => computePnL(legs, prices, maxDays,   ivMult, feesApplied, spotPrice), [legs, prices, maxDays, ivMult, feesApplied, spotPrice])
-  const greeks      = useMemo(() => computePositionGreeks(legs, spotPrice, sliderDays, ivMult), [legs, spotPrice, sliderDays, ivMult])
-  const breakevens  = useMemo(() => findBreakevens(prices, expiryPnL), [prices, expiryPnL])
-  const greeksData  = useMemo(() => computeGreeksProfile(legs, prices, sliderDays, ivMult), [legs, prices, sliderDays, ivMult])
+  const greeks         = useMemo(() => computePositionGreeks(legs, spotPrice, sliderDays, ivMult), [legs, spotPrice, sliderDays, ivMult])
+  const breakevens     = useMemo(() => findBreakevens(prices, expiryPnL), [prices, expiryPnL])
+  const greeksData     = useMemo(() => computeGreeksProfile(legs, prices, sliderDays, ivMult), [legs, prices, sliderDays, ivMult])
+  const greeksAtPrice  = useMemo(() => computeGreeksAtPrice(legs, prices, sliderDays, ivMult), [legs, prices, sliderDays, ivMult])
 
-  const chartData = prices.map((p, i) => ({
-    price: Math.round(p),
-    today: parseFloat(todayPnL[i].toFixed(2)),
-    selected: parseFloat(sliderPnL[i].toFixed(2)),
-    expiry: parseFloat(expiryPnL[i].toFixed(2)),
-  }))
+  const chartData = useMemo(() => prices.map((p, i) => {
+    const t = parseFloat(todayPnL[i].toFixed(2))
+    const s = parseFloat(sliderPnL[i].toFixed(2))
+    const e = parseFloat(expiryPnL[i].toFixed(2))
+    return {
+      price: Math.round(p),
+      today_p: t >= 0 ? t : null,
+      today_n: t <= 0 ? t : null,
+      sel_p:   s >= 0 ? s : null,
+      sel_n:   s <= 0 ? s : null,
+      exp_p:   e >= 0 ? e : null,
+      exp_n:   e <= 0 ? e : null,
+      ...greeksAtPrice[i],
+    }
+  }), [prices, todayPnL, sliderPnL, expiryPnL, greeksAtPrice])
 
   const sliderDate = new Date(Date.now() + sliderDays * 86_400_000)
     .toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
@@ -228,7 +267,7 @@ export default function PnLChart({ legs, spotPrice }: PnLChartProps) {
               tick={{ fontSize: 10, fill: axisColor }} stroke={gridColor} />
             <YAxis tickFormatter={v => `${v >= 0 ? '+' : ''}${Number(v).toFixed(0)}`}
               tick={{ fontSize: 10, fill: axisColor }} stroke={gridColor} width={55} />
-            <Tooltip content={<CustomTooltip />} />
+            <Tooltip content={(props: any) => <CustomTooltip {...props} sliderLabel={sliderDays === 0 ? 'Today' : sliderDate} />} />
             <ReferenceArea y1={0} fill={profitFill} fillOpacity={0.04} />
             <ReferenceArea y2={0} fill={lossFill}   fillOpacity={0.04} />
             <ReferenceLine y={0} stroke={zeroColor} strokeWidth={1.5} />
@@ -238,11 +277,21 @@ export default function PnLChart({ legs, spotPrice }: PnLChartProps) {
               <ReferenceLine key={i} x={Math.round(be)} stroke="#f59e0b" strokeDasharray="2 2"
                 label={{ value: `BE $${Math.round(be).toLocaleString()}`, position: 'insideTopLeft', fontSize: 9, fill: '#f59e0b' }} />
             ))}
-            <Line type="monotone" dataKey="today" name="Today" stroke="#22c55e" dot={false} strokeWidth={1.5} strokeDasharray="4 3" />
-            <Line type="monotone" dataKey="selected" name={sliderDays === 0 ? 'Today' : sliderDate}
-              stroke="#22c55e" dot={false} strokeWidth={2} />
-            <Line type="monotone" dataKey="expiry" name={`Expiry (${expiryDate})`}
-              stroke="#ef4444" dot={false} strokeWidth={1.5} strokeDasharray="2 2" />
+            {/* Today */}
+            <Line type="monotone" dataKey="today_p" name="Today"
+              stroke="#22c55e" dot={false} strokeWidth={1.5} strokeDasharray="4 3" connectNulls={false} />
+            <Line type="monotone" dataKey="today_n" name="Today"
+              stroke="#ef4444" dot={false} strokeWidth={1.5} strokeDasharray="4 3" legendType="none" connectNulls={false} />
+            {/* Selected */}
+            <Line type="monotone" dataKey="sel_p" name={sliderDays === 0 ? 'Today' : sliderDate}
+              stroke="#22c55e" dot={false} strokeWidth={2} connectNulls={false} />
+            <Line type="monotone" dataKey="sel_n" name={sliderDays === 0 ? 'Today' : sliderDate}
+              stroke="#ef4444" dot={false} strokeWidth={2} legendType="none" connectNulls={false} />
+            {/* Expiry */}
+            <Line type="monotone" dataKey="exp_p" name={`Expiry (${expiryDate})`}
+              stroke="#22c55e" dot={false} strokeWidth={1.5} strokeDasharray="2 2" connectNulls={false} />
+            <Line type="monotone" dataKey="exp_n" name={`Expiry (${expiryDate})`}
+              stroke="#ef4444" dot={false} strokeWidth={1.5} strokeDasharray="2 2" legendType="none" connectNulls={false} />
             <Legend wrapperStyle={{ fontSize: 11, color: axisColor }} />
           </LineChart>
         </ResponsiveContainer>
