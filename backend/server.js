@@ -1023,6 +1023,42 @@ app.get('/api/combined/options/:baseCoin', (req, res) => {
   }
 });
 
+app.get('/api/stream/polymarket/:asset', async (req, res) => {
+  const asset = req.params.asset.toUpperCase()
+  const spotPrice = Number(req.query.spotPrice ?? 0) || 0
+
+  res.setHeader('Content-Type',  'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection',    'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders()
+  res.socket?.setNoDelay(true)
+  res.write('retry: 1000\n\n')
+
+  try {
+    const surface = await polymarketService.getSurface({ asset, spotPrice })
+    registerPolymarketAssetTokens(asset, surface)
+    subscribePolymarketAssetIds(
+      Object.values(surface?.horizons ?? {}).flatMap((horizon) =>
+        (horizon?.sourceMarkets ?? []).map((market) => market.tokenId).filter(Boolean),
+      ),
+    )
+    res.write(`data: ${JSON.stringify(surface)}\n\n`)
+  } catch (error) {
+    res.write(`data: ${JSON.stringify({ error: error?.message || 'Polymarket surface unavailable' })}\n\n`)
+  }
+
+  const key = `polymarket:${asset}`
+  if (!sseClients.has(key)) sseClients.set(key, new Map())
+  sseClients.get(key).set(res, { spotPrice })
+
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 5_000)
+  req.on('close', () => {
+    clearInterval(heartbeat)
+    sseClients.get(key)?.delete(res)
+  })
+})
+
 // ─── SSE Stream Route ─────────────────────────────────────────────────────────
 
 app.get('/api/stream/:exchange/:coin', (req, res) => {
@@ -1060,42 +1096,6 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
     clearInterval(heartbeat)
     sseClients.get(key)?.delete(res)
     if (exchange === 'derive') removeDeriveViewer(coin)
-  })
-})
-
-app.get('/api/stream/polymarket/:asset', async (req, res) => {
-  const asset = req.params.asset.toUpperCase()
-  const spotPrice = Number(req.query.spotPrice ?? 0) || 0
-
-  res.setHeader('Content-Type',  'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection',    'keep-alive')
-  res.setHeader('X-Accel-Buffering', 'no')
-  res.flushHeaders()
-  res.socket?.setNoDelay(true)
-  res.write('retry: 1000\n\n')
-
-  try {
-    const surface = await polymarketService.getSurface({ asset, spotPrice })
-    registerPolymarketAssetTokens(asset, surface)
-    subscribePolymarketAssetIds(
-      Object.values(surface?.horizons ?? {}).flatMap((horizon) =>
-        (horizon?.sourceMarkets ?? []).map((market) => market.tokenId).filter(Boolean),
-      ),
-    )
-    res.write(`data: ${JSON.stringify(surface)}\n\n`)
-  } catch (error) {
-    res.write(`data: ${JSON.stringify({ error: error?.message || 'Polymarket surface unavailable' })}\n\n`)
-  }
-
-  const key = `polymarket:${asset}`
-  if (!sseClients.has(key)) sseClients.set(key, new Map())
-  sseClients.get(key).set(res, { spotPrice })
-
-  const heartbeat = setInterval(() => res.write(': ping\n\n'), 5_000)
-  req.on('close', () => {
-    clearInterval(heartbeat)
-    sseClients.get(key)?.delete(res)
   })
 })
 
