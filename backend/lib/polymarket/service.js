@@ -15,6 +15,24 @@ function parseOpenInterest(rows = []) {
   return Number.isFinite(value) ? value : 0
 }
 
+function parseOutcomeProbability(market = {}) {
+  const raw = market.outcomePrices
+  if (Array.isArray(raw) && raw.length) {
+    const value = Number(raw[0])
+    return Number.isFinite(value) ? value : null
+  }
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed) && parsed.length) {
+        const value = Number(parsed[0])
+        return Number.isFinite(value) ? value : null
+      }
+    } catch {}
+  }
+  return null
+}
+
 function resolveTokenId(market = {}) {
   if (Array.isArray(market.clobTokenIds) && market.clobTokenIds.length) {
     return String(market.clobTokenIds[0])
@@ -189,26 +207,46 @@ export function createPolymarketService({
         .filter(Boolean)
 
       const missingPriceTokenIds = selectedMarkets
-        .filter((market) => !(Number.isFinite(Number(market.lastTradePrice)) && Number(market.lastTradePrice) > 0))
+        .filter((market) =>
+          !Number.isFinite(Number(market.lastTradePrice))
+          && !Number.isFinite(parseOutcomeProbability(market))
+        )
         .map(resolveTokenId)
         .filter(Boolean)
 
-      const prices = missingPriceTokenIds.length ? await client.getClobPrices(missingPriceTokenIds) : {}
+      let prices = {}
+      if (missingPriceTokenIds.length) {
+        try {
+          prices = await client.getClobPrices(missingPriceTokenIds)
+        } catch {
+          prices = {}
+        }
+      }
+
+      const expiryDate = selectedMarkets
+        .map((market) => market.event?.endDate ?? market.endDate ?? null)
+        .find(Boolean) ?? null
 
       const sourceMarkets = await Promise.all(selectedMarkets.map(async (market) => {
         const tokenId = resolveTokenId(market)
         const openInterestRows = await client.getOpenInterest(market.conditionId ?? market.id)
         const classification = classifyPolymarketMarket(market)
+        const fallbackProbability = parseOutcomeProbability(market)
+        const gammaPrice = Number(market.lastTradePrice)
+        const clobPrice = tokenId ? Number(prices[tokenId]) : Number.NaN
         return {
           id: market.id,
           slug: market.slug ?? null,
           question: market.question ?? market.title ?? '',
           tokenId,
-          lastTradePrice: Number.isFinite(Number(market.lastTradePrice)) && Number(market.lastTradePrice) > 0
-            ? Number(market.lastTradePrice)
-            : tokenId
-              ? Number(prices[tokenId] ?? 0)
-              : 0,
+          endDate: market.event?.endDate ?? market.endDate ?? null,
+          lastTradePrice: Number.isFinite(gammaPrice)
+            ? gammaPrice
+            : Number.isFinite(fallbackProbability)
+              ? Number(fallbackProbability)
+              : Number.isFinite(clobPrice)
+                ? clobPrice
+                : 0,
           volumeNum: Number(market.volumeNum ?? market.volume ?? 0) || 0,
           openInterest: parseOpenInterest(openInterestRows),
           spreadPct: Number(market.spreadPct ?? market.spread ?? 0) || 0,
@@ -232,6 +270,7 @@ export function createPolymarketService({
       return {
         asset,
         horizon,
+        expiryDate,
         distribution,
         summary,
         confidence,

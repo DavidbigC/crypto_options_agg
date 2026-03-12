@@ -37,6 +37,7 @@ export type PolysisSourceMarket = {
   id: string
   slug?: string | null
   question: string
+  endDate?: string | null
   tokenId?: string | null
   lastTradePrice?: number
   volumeNum?: number
@@ -56,6 +57,7 @@ export type PolysisSourceMarket = {
 export type PolysisResponse = {
   asset: 'BTC' | 'ETH' | 'SOL'
   horizon: 'daily' | 'weekly' | 'monthly' | 'yearly'
+  expiryDate?: string | null
   distribution: PolysisDistribution
   summary: PolysisSummary
   pathSummary: PolysisPathSummary | null

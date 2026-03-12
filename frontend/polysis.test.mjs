@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  buildPolysisExpirySeries,
   buildPolysisDistributionChartData,
   formatPolysisConfidence,
   mapPolymarketResponse,
@@ -72,4 +73,34 @@ test('formatPolysisConfidence returns a compact UI label', () => {
   assert.equal(formatPolysisConfidence({ score: 78, label: 'high' }), 'High confidence (78/100)')
   assert.equal(formatPolysisConfidence({ score: 42, label: 'medium' }), 'Medium confidence (42/100)')
   assert.equal(formatPolysisConfidence(null), 'Confidence unavailable')
+})
+
+test('buildPolysisExpirySeries prefers path move and sorts by expiry date', () => {
+  const rows = buildPolysisExpirySeries([
+    {
+      asset: 'BTC',
+      horizon: 'yearly',
+      expiryDate: '2026-12-31T16:00:00Z',
+      pathSummary: { pathMovePct: 35, upsidePathPct: 20, downsidePathPct: 15 },
+      summary: { expectedMovePct: 18 },
+      confidence: { marketCount: 12 },
+    },
+    {
+      asset: 'BTC',
+      horizon: 'weekly',
+      expiryDate: '2026-03-12T16:00:00Z',
+      pathSummary: null,
+      summary: { expectedMovePct: 2.4 },
+      confidence: { marketCount: 9 },
+    },
+  ])
+
+  assert.equal(rows.length, 2)
+  assert.equal(rows[0].horizon, 'weekly')
+  assert.equal(rows[0].movePct, 2.4)
+  assert.equal(rows[0].signalType, 'terminal')
+  assert.equal(rows[1].movePct, 35)
+  assert.equal(rows[1].upPct, 20)
+  assert.equal(rows[1].downPct, 15)
+  assert.equal(rows[1].signalType, 'path')
 })

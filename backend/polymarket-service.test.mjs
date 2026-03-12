@@ -230,6 +230,41 @@ test('createPolymarketService uses Gamma lastTradePrice directly when available'
   assert.equal(result.distribution.source, 'threshold')
 })
 
+test('createPolymarketService falls back to outcomePrices when CLOB pricing fails', async () => {
+  const service = createPolymarketService({
+    client: {
+      searchGamma: async () => ({
+        events: [{
+          slug: 'eth-weekly',
+          title: 'Ethereum weekly',
+          endDate: '2026-03-12T16:00:00Z',
+          tags: [{ slug: 'ethereum' }, { slug: 'weekly' }],
+          markets: [
+            {
+              id: 'm1',
+              question: 'Will the price of Ethereum be above $2,100 on March 12?',
+              volumeNum: 5000,
+              spread: 0.01,
+              outcomePrices: '["0.45","0.55"]',
+              clobTokenIds: '["401","402"]',
+            },
+          ],
+        }],
+      }),
+      getClobPrices: async () => {
+        throw new Error('invalid payload')
+      },
+      getOpenInterest: async () => ([{ value: 5000 }]),
+    },
+  })
+
+  const result = await service.getAnalysis({ asset: 'ETH', horizon: 'weekly', spotPrice: 2050 })
+
+  assert.equal(result.expiryDate, '2026-03-12T16:00:00Z')
+  assert.equal(result.sourceMarkets[0].lastTradePrice, 0.45)
+  assert.equal(result.sourceMarkets[0].classification.type, 'threshold')
+})
+
 test('createPolymarketService requests open interest with conditionId and reads value payloads', async () => {
   const seen = []
   const service = createPolymarketService({

@@ -2,12 +2,28 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import classNames from 'classnames'
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
 import Header from '@/components/Header'
-import { buildPolysisDistributionChartData, formatPolysisConfidence, mapPolymarketResponse } from '@/lib/polysis.js'
+import {
+  buildPolysisDistributionChartData,
+  buildPolysisExpirySeries,
+  formatPolysisConfidence,
+  mapPolymarketResponse,
+} from '@/lib/polysis.js'
 import type { PolysisResponse, PolysisSourceMarket } from '@/types/polysis'
 
 const ASSETS = ['BTC', 'ETH', 'SOL'] as const
 const HORIZONS = ['daily', 'weekly', 'monthly', 'yearly'] as const
+
+type HorizonKey = typeof HORIZONS[number]
 type DistributionRow = {
   label: string
   low: number
@@ -30,6 +46,18 @@ function formatBarrier(value: number | null | undefined) {
   return `$${Math.round(value).toLocaleString('en-US')}`
 }
 
+function formatExpiry(value: string | null | undefined) {
+  if (!value) return 'Unknown'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
 function marketTypeLabel(market: PolysisSourceMarket) {
   const type = market.classification?.type ?? 'unknown'
   if (type === 'range') return 'Range'
@@ -38,14 +66,32 @@ function marketTypeLabel(market: PolysisSourceMarket) {
   return 'Unknown'
 }
 
+function ChartTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { horizon?: string; expiryDate?: string; movePct?: number | null; upPct?: number | null; downPct?: number | null; signalType?: string } }> }) {
+  const point = payload?.[0]?.payload
+  if (!active || !point) return null
+
+  return (
+    <div className="rounded-lg border border-rim bg-card px-3 py-2 shadow-lg">
+      <div className="text-xs uppercase tracking-[0.14em] text-ink-3">{point.horizon}</div>
+      <div className="mt-1 text-sm font-medium text-ink">{formatExpiry(point.expiryDate)}</div>
+      <div className="mt-2 space-y-1 text-xs text-ink-2">
+        <div>Move: {formatPercent(point.movePct)}</div>
+        <div>Up: {formatPercent(point.upPct)}</div>
+        <div>Down: {formatPercent(point.downPct)}</div>
+        <div>Mode: {point.signalType}</div>
+      </div>
+    </div>
+  )
+}
+
 export default function PolysisPage() {
   const [asset, setAsset] = useState<typeof ASSETS[number]>('BTC')
-  const [horizon, setHorizon] = useState<typeof HORIZONS[number]>('weekly')
+  const [focusHorizon, setFocusHorizon] = useState<HorizonKey>('weekly')
   const [spotPrice, setSpotPrice] = useState('')
   const [referenceSpot, setReferenceSpot] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [payload, setPayload] = useState<PolysisResponse | null>(null)
+  const [payloads, setPayloads] = useState<Partial<Record<HorizonKey, PolysisResponse | null>>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -79,17 +125,24 @@ export default function PolysisPage() {
       try {
         const activeSpot = Number(spotPrice) > 0 ? Number(spotPrice) : referenceSpot
         const query = activeSpot && activeSpot > 0 ? `?spotPrice=${encodeURIComponent(activeSpot)}` : ''
-        const response = await fetch(`http://localhost:3500/api/polymarket/${asset}/${horizon}${query}`)
-        const raw = await response.json().catch(() => ({}))
-        if (!response.ok) {
-          throw new Error(raw?.error || `Server error ${response.status}`)
-        }
+        const responses = await Promise.all(HORIZONS.map(async (horizon) => {
+          const response = await fetch(`http://localhost:3500/api/polymarket/${asset}/${horizon}${query}`)
+          const raw = await response.json().catch(() => ({}))
+          if (!response.ok) {
+            throw new Error(`${horizon}: ${raw?.error || `Server error ${response.status}`}`)
+          }
+          return [horizon, mapPolymarketResponse(raw) as PolysisResponse] as const
+        }))
+
         if (!cancelled) {
-          setPayload(mapPolymarketResponse(raw) as PolysisResponse)
+          const nextPayloads = Object.fromEntries(responses) as Partial<Record<HorizonKey, PolysisResponse>>
+          setPayloads(nextPayloads)
+          const firstAvailable = HORIZONS.find((key) => nextPayloads[key])
+          setFocusHorizon((current) => (nextPayloads[current] ? current : (firstAvailable ?? 'weekly')))
         }
       } catch (nextError) {
         if (!cancelled) {
-          setPayload(null)
+          setPayloads({})
           setError(nextError instanceof Error ? nextError.message : 'Unable to load Polymarket data')
         }
       } finally {
@@ -101,48 +154,61 @@ export default function PolysisPage() {
     return () => {
       cancelled = true
     }
-  }, [asset, horizon, spotPrice, referenceSpot])
+  }, [asset, spotPrice, referenceSpot])
 
-  const distributionRows = useMemo<DistributionRow[]>(
-    () => buildPolysisDistributionChartData(payload?.distribution ?? { bins: [] }),
-    [payload],
+  const entries = useMemo(
+    () => HORIZONS.map((horizon) => payloads[horizon]).filter(Boolean) as PolysisResponse[],
+    [payloads],
   )
 
-  const topProbability = distributionRows.reduce((max, row) => Math.max(max, row.probability), 0)
-  const sourceMarkets = payload?.sourceMarkets ?? []
-  const pathMarkets = payload?.pathMarkets ?? []
-  const pathSummary = payload?.pathSummary ?? null
-  const eligibleCount = payload?.confidence?.marketCount ?? sourceMarkets.length
-  const showPathHero = Boolean(pathMarkets.length && pathSummary?.pathMovePct !== null)
+  const chartRows = useMemo(() => buildPolysisExpirySeries(entries), [entries])
+  const focusedPayload = payloads[focusHorizon] ?? entries[0] ?? null
+  const focusedDistribution = useMemo<DistributionRow[]>(
+    () => buildPolysisDistributionChartData(focusedPayload?.distribution ?? { bins: [] }),
+    [focusedPayload],
+  )
+  const topProbability = focusedDistribution.reduce((max, row) => Math.max(max, row.probability), 0)
+  const sourceMarkets = focusedPayload?.sourceMarkets ?? []
+  const pathMarkets = focusedPayload?.pathMarkets ?? []
+  const strongestRow = chartRows.reduce<{ horizon?: string | null; movePct: number }>(
+    (best, row) => (Number(row.movePct ?? -1) > best.movePct ? { horizon: row.horizon, movePct: Number(row.movePct) } : best),
+    { movePct: -1 },
+  )
 
   return (
     <div className="min-h-screen bg-surface">
       <Header exchange="combined" onExchangeChange={() => {}} hideExchangeSelector />
 
-      <main className="container mx-auto px-4 py-4 space-y-4">
+      <main className="container mx-auto space-y-4 px-4 py-4">
         <section className="card overflow-hidden">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div className="space-y-2 max-w-2xl">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="max-w-2xl space-y-2">
               <div className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-ink-2">
                 Polysis
               </div>
               <div>
-                <h1 className="text-xl font-semibold tracking-tight text-ink">Prediction-Market Vol Detector</h1>
+                <h1 className="text-xl font-semibold tracking-tight text-ink">Prediction-Market Vol Surface</h1>
                 <p className="mt-2 text-sm text-ink-2">
-                  Read Polymarket crypto markets as a distribution surface. This page highlights expected move,
-                  range concentration, and signal quality without mixing prediction-market prices into the options chain.
+                  Plot Polymarket move signals by expiry. The x-axis is the market resolution date and the y-axis is the move metric,
+                  using terminal move when a close ladder exists and path move when the market is dominated by reach or dip barriers.
                 </p>
               </div>
             </div>
 
-            <div className="grid gap-2 sm:grid-cols-2">
+            <div className="grid gap-2 sm:grid-cols-3">
               <div className="rounded-lg border border-rim bg-muted/60 px-3 py-2 text-xs">
                 <div className="text-ink-3 uppercase tracking-[0.14em]">Signal</div>
-                <div className="mt-1 font-medium text-ink">{formatPolysisConfidence(payload?.confidence ?? null)}</div>
+                <div className="mt-1 font-medium text-ink">{formatPolysisConfidence(focusedPayload?.confidence ?? null)}</div>
               </div>
               <div className="rounded-lg border border-rim bg-muted/60 px-3 py-2 text-xs">
-                <div className="text-ink-3 uppercase tracking-[0.14em]">Markets Used</div>
-                <div className="mt-1 font-medium text-ink">{eligibleCount}</div>
+                <div className="text-ink-3 uppercase tracking-[0.14em]">Strongest Move</div>
+                <div className="mt-1 font-medium text-ink">
+                  {strongestRow.movePct >= 0 ? `${strongestRow.horizon}: ${formatPercent(strongestRow.movePct)}` : 'N/A'}
+                </div>
+              </div>
+              <div className="rounded-lg border border-rim bg-muted/60 px-3 py-2 text-xs">
+                <div className="text-ink-3 uppercase tracking-[0.14em]">Points</div>
+                <div className="mt-1 font-medium text-ink">{chartRows.length}</div>
               </div>
             </div>
           </div>
@@ -153,27 +219,12 @@ export default function PolysisPage() {
                 <button
                   key={nextAsset}
                   onClick={() => setAsset(nextAsset)}
-                  className={classNames('px-3 py-1 rounded text-xs font-medium border transition-colors', {
-                    'bg-tone text-white border-tone': asset === nextAsset,
-                    'text-ink-2 border-rim hover:text-ink hover:border-ink-3': asset !== nextAsset,
+                  className={classNames('rounded border px-3 py-1 text-xs font-medium transition-colors', {
+                    'border-tone bg-tone text-white': asset === nextAsset,
+                    'border-rim text-ink-2 hover:border-ink-3 hover:text-ink': asset !== nextAsset,
                   })}
                 >
                   {nextAsset}
-                </button>
-              ))}
-            </div>
-
-            <div className="flex gap-1">
-              {HORIZONS.map((nextHorizon) => (
-                <button
-                  key={nextHorizon}
-                  onClick={() => setHorizon(nextHorizon)}
-                  className={classNames('px-3 py-1 rounded text-xs font-medium border capitalize transition-colors', {
-                    'bg-card text-ink border-tone shadow-sm': horizon === nextHorizon,
-                    'text-ink-2 border-rim hover:text-ink hover:border-ink-3': horizon !== nextHorizon,
-                  })}
-                >
-                  {nextHorizon}
                 </button>
               ))}
             </div>
@@ -194,91 +245,136 @@ export default function PolysisPage() {
           </div>
         </section>
 
-        {error && (
-          <section className="card text-sm text-rose-600 dark:text-rose-400">
-            {error}
-          </section>
-        )}
+        {error && <section className="card text-sm text-rose-600 dark:text-rose-400">{error}</section>}
+
+        <section className="card">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Expiry Move Chart</h2>
+              <p className="mt-1 text-xs text-ink-3">Total move is shown for every available expiry. Up and down components appear when Polymarket gives a path ladder.</p>
+            </div>
+            {loading && <div className="text-xs text-ink-3">Loading…</div>}
+          </div>
+
+          <div className="mt-4 h-[320px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartRows} margin={{ top: 10, right: 20, left: 0, bottom: 10 }}>
+                <CartesianGrid stroke="var(--color-rim, #e7ddd3)" strokeDasharray="3 3" />
+                <XAxis dataKey="expiryLabel" tick={{ fontSize: 12, fill: '#8e7d6b' }} />
+                <YAxis tickFormatter={(value) => `${value}%`} tick={{ fontSize: 12, fill: '#8e7d6b' }} width={52} />
+                <Tooltip content={<ChartTooltip />} />
+                <Line type="monotone" dataKey="movePct" name="Move %" stroke="#b5702d" strokeWidth={3} dot={{ r: 4 }} activeDot={{ r: 6 }} />
+                <Line type="monotone" dataKey="upPct" name="Up %" stroke="#2f8f57" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
+                <Line type="monotone" dataKey="downPct" name="Down %" stroke="#b44a3c" strokeWidth={2} dot={{ r: 3 }} connectNulls={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
 
         <section className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
-          <div className="card space-y-4">
+          <div className="card">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-sm font-semibold text-ink">Implied Move</h2>
-                <p className="mt-1 text-xs text-ink-3">Derived from the normalized Polymarket terminal distribution.</p>
-              </div>
-              {loading && <div className="text-xs text-ink-3">Loading…</div>}
-            </div>
-
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-              <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">
-                  {showPathHero ? 'Path Move' : 'Expected Price'}
-                </div>
-                <div className="mt-2 text-lg font-semibold text-ink">
-                  {showPathHero ? formatPercent(pathSummary?.pathMovePct) : formatUsd(payload?.summary?.expectedPrice)}
-                </div>
-                {showPathHero && <div className="text-xs text-ink-3">{formatUsd(pathSummary?.pathMoveUsd)}</div>}
-              </div>
-              <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">
-                  {showPathHero ? 'Up Path' : 'Expected Move'}
-                </div>
-                <div className="mt-2 text-lg font-semibold text-ink">
-                  {showPathHero ? formatPercent(pathSummary?.upsidePathPct) : formatUsd(payload?.summary?.expectedMove)}
-                </div>
-                <div className="text-xs text-ink-3">
-                  {showPathHero ? `Barrier ${formatBarrier(pathSummary?.strongestUpsideBarrier)}` : formatPercent(payload?.summary?.expectedMovePct)}
-                </div>
-              </div>
-              <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">
-                  {showPathHero ? 'Down Path' : 'Most Likely Range'}
-                </div>
-                <div className="mt-2 text-lg font-semibold text-ink">
-                  {showPathHero
-                    ? formatPercent(pathSummary?.downsidePathPct)
-                    : payload?.summary?.mostLikelyRange
-                    ? `${formatUsd(payload.summary.mostLikelyRange.low)}-${formatUsd(payload.summary.mostLikelyRange.high)}`
-                    : 'N/A'}
-                </div>
-                {showPathHero && <div className="text-xs text-ink-3">Barrier {formatBarrier(pathSummary?.strongestDownsideBarrier)}</div>}
-              </div>
-              <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Repricing</div>
-                <div className="mt-2 text-sm font-medium text-ink">
-                  24h: {formatPercent(payload?.repricing?.change24h)}
-                </div>
-                <div className="text-sm font-medium text-ink">
-                  7d: {formatPercent(payload?.repricing?.change7d)}
-                </div>
+                <h2 className="text-sm font-semibold text-ink">Expiry Surface</h2>
+                <p className="mt-1 text-xs text-ink-3">Each row is one horizon, keyed by its Polymarket expiry date.</p>
               </div>
             </div>
 
-            {pathMarkets.length > 0 && (
-              <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
-                <div className="font-semibold">Path-Based Volatility Signal</div>
-                <div className="mt-1 text-xs text-amber-800/80 dark:text-amber-300/80">
-                  This horizon is currently dominated by barrier-style “reach / dip” markets rather than a clean terminal price ladder.
-                  Those markets are shown below as volatility-stress signals instead of being forced into an implied close distribution.
+            <div className="mt-4 space-y-2">
+              {chartRows.map((row) => (
+                <button
+                  key={`${row.horizon}-${row.expiryDate}`}
+                  onClick={() => setFocusHorizon((row.horizon as HorizonKey) ?? 'weekly')}
+                  className={classNames('grid w-full gap-2 rounded-lg border px-3 py-3 text-left transition-colors sm:grid-cols-[0.9fr,1fr,0.8fr,0.8fr,0.8fr]', {
+                    'border-tone bg-muted/40': focusHorizon === row.horizon,
+                    'border-rim bg-card hover:border-ink-3': focusHorizon !== row.horizon,
+                  })}
+                >
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">{row.horizon}</div>
+                    <div className="mt-1 text-sm font-medium text-ink">{row.expiryLabel}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Move</div>
+                    <div className="mt-1 text-sm font-medium text-ink">{formatPercent(row.movePct)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Up</div>
+                    <div className="mt-1 text-sm font-medium text-ink">{formatPercent(row.upPct)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Down</div>
+                    <div className="mt-1 text-sm font-medium text-ink">{formatPercent(row.downPct)}</div>
+                  </div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Mode</div>
+                    <div className="mt-1 text-sm font-medium capitalize text-ink">{row.signalType}</div>
+                  </div>
+                </button>
+              ))}
+
+              {!chartRows.length && (
+                <div className="rounded-lg border border-rim bg-card px-4 py-6 text-sm text-ink-3">
+                  No qualifying Polymarket expiries available for this asset.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <section className="card">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-ink">Focused Expiry</h2>
+                  <p className="mt-1 text-xs text-ink-3">
+                    {focusedPayload ? `${focusedPayload.horizon} settling ${formatExpiry(focusedPayload.expiryDate)}` : 'Select an expiry row to inspect the underlying markets.'}
+                  </p>
                 </div>
               </div>
-            )}
 
-            <div className="rounded-xl border border-rim bg-card">
-              <div className="border-b border-rim px-4 py-3">
-                <h3 className="text-sm font-semibold text-ink">{showPathHero ? 'Terminal Ladder' : 'Distribution Ladder'}</h3>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg border border-rim bg-muted/40 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Move</div>
+                  <div className="mt-2 text-lg font-semibold text-ink">
+                    {formatPercent(focusedPayload?.pathSummary?.pathMovePct ?? focusedPayload?.summary?.expectedMovePct)}
+                  </div>
+                  <div className="text-xs text-ink-3">
+                    {focusedPayload?.pathSummary?.pathMoveUsd ? formatUsd(focusedPayload.pathSummary.pathMoveUsd) : focusedPayload?.distribution?.source}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-rim bg-muted/40 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Path Split</div>
+                  <div className="mt-2 text-lg font-semibold text-ink">
+                    {formatPercent(focusedPayload?.pathSummary?.upsidePathPct)} / {formatPercent(focusedPayload?.pathSummary?.downsidePathPct)}
+                  </div>
+                  <div className="text-xs text-ink-3">
+                    {formatBarrier(focusedPayload?.pathSummary?.strongestUpsideBarrier)} / {formatBarrier(focusedPayload?.pathSummary?.strongestDownsideBarrier)}
+                  </div>
+                </div>
+                <div className="rounded-lg border border-rim bg-muted/40 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Open Interest</div>
+                  <div className="mt-2 text-lg font-semibold text-ink">{formatUsd(focusedPayload?.confidence?.totalOpenInterest ?? null)}</div>
+                </div>
+                <div className="rounded-lg border border-rim bg-muted/40 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Volume</div>
+                  <div className="mt-2 text-lg font-semibold text-ink">{formatUsd(focusedPayload?.confidence?.totalVolume ?? null)}</div>
+                </div>
               </div>
-              <div className="divide-y divide-rim">
-                {!distributionRows.length && (
+            </section>
+
+            <section className="card">
+              <div className="border-b border-rim px-0 pb-3">
+                <h3 className="text-sm font-semibold text-ink">Focused Ladder</h3>
+              </div>
+              <div className="mt-3 divide-y divide-rim rounded-xl border border-rim bg-card">
+                {!focusedDistribution.length && (
                   <div className="px-4 py-6 text-sm text-ink-3">
                     {pathMarkets.length
-                      ? 'No terminal close ladder is available for this horizon. Use the path-based volatility signals below.'
-                      : 'No qualifying Polymarket bins available for this view yet.'}
+                      ? 'No terminal ladder for this expiry. The signal is path-based and represented in the move chart above.'
+                      : 'No terminal ladder available for this expiry.'}
                   </div>
                 )}
-
-                {distributionRows.map((row) => (
+                {focusedDistribution.map((row) => (
                   <div key={row.label} className="px-4 py-3">
                     <div className="flex items-center justify-between gap-4 text-sm">
                       <div className="font-medium text-ink">{row.label}</div>
@@ -287,80 +383,25 @@ export default function PolysisPage() {
                     <div className="mt-2 h-2 rounded-full bg-muted">
                       <div
                         className="h-2 rounded-full bg-tone transition-all"
-                        style={{
-                          width: topProbability > 0 ? `${(row.probability / topProbability) * 100}%` : '0%',
-                        }}
+                        style={{ width: topProbability > 0 ? `${(row.probability / topProbability) * 100}%` : '0%' }}
                       />
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <section className="card">
-              <h2 className="text-sm font-semibold text-ink">Signal Quality</h2>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Confidence Score</div>
-                  <div className="mt-2 text-lg font-semibold text-ink">{payload?.confidence?.score ?? 'N/A'}</div>
-                </div>
-                <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Open Interest</div>
-                  <div className="mt-2 text-lg font-semibold text-ink">{formatUsd(payload?.confidence?.totalOpenInterest ?? null)}</div>
-                </div>
-                <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Volume</div>
-                  <div className="mt-2 text-lg font-semibold text-ink">{formatUsd(payload?.confidence?.totalVolume ?? null)}</div>
-                </div>
-                <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Distribution Source</div>
-                  <div className="mt-2 text-lg font-semibold capitalize text-ink">{payload?.distribution?.source ?? 'N/A'}</div>
-                </div>
-                <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Path Markets</div>
-                  <div className="mt-2 text-lg font-semibold text-ink">{pathMarkets.length}</div>
-                </div>
-              </div>
             </section>
-
-            {pathMarkets.length > 0 && (
-              <section className="card">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h2 className="text-sm font-semibold text-ink">Volatility Stress Ladder</h2>
-                    <p className="mt-1 text-xs text-ink-3">Barrier-style markets that signal reach / dip probabilities.</p>
-                  </div>
-                  <div className="text-xs text-ink-3">{pathMarkets.length} active</div>
-                </div>
-
-                <div className="mt-4 space-y-2">
-                  {pathMarkets.slice(0, 8).map((market) => (
-                    <div key={market.id} className="rounded-lg border border-rim bg-muted/30 px-3 py-2">
-                      <div className="flex items-center justify-between gap-3 text-sm">
-                        <div className="font-medium text-ink">{market.question}</div>
-                        <div className="text-ink-2">{formatPercent((market.lastTradePrice ?? 0) * 100)}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
 
             <section className="card">
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h2 className="text-sm font-semibold text-ink">Source Markets</h2>
-                  <p className="mt-1 text-xs text-ink-3">Markets feeding the detector, including any filtered-out entries.</p>
+                  <p className="mt-1 text-xs text-ink-3">The markets feeding the focused expiry signal.</p>
                 </div>
                 <div className="text-xs text-ink-3">{sourceMarkets.length} discovered</div>
               </div>
 
               <div className="mt-4 space-y-3">
-                {!sourceMarkets.length && (
-                  <div className="text-sm text-ink-3">No source markets found for this asset and horizon.</div>
-                )}
+                {!sourceMarkets.length && <div className="text-sm text-ink-3">No source markets found for this expiry.</div>}
 
                 {sourceMarkets.map((market) => (
                   <article key={market.id} className="rounded-lg border border-rim bg-muted/30 p-3">
@@ -371,7 +412,7 @@ export default function PolysisPage() {
                           <span className="rounded-full border border-rim px-2 py-0.5 text-[10px] uppercase tracking-[0.14em]">
                             {marketTypeLabel(market)}
                           </span>
-                          <span>ID {market.id}</span>
+                          <span>{formatExpiry(market.endDate)}</span>
                         </div>
                       </div>
                       <a
@@ -384,7 +425,7 @@ export default function PolysisPage() {
                       </a>
                     </div>
 
-                    <div className="mt-3 grid gap-2 sm:grid-cols-3 text-xs text-ink-2">
+                    <div className="mt-3 grid gap-2 text-xs text-ink-2 sm:grid-cols-3">
                       <div>Last price: {formatPercent((market.lastTradePrice ?? 0) * 100)}</div>
                       <div>Volume: {formatUsd(market.volumeNum ?? null)}</div>
                       <div>Open interest: {formatUsd(market.openInterest ?? null)}</div>

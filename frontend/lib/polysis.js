@@ -8,6 +8,7 @@ export function mapPolymarketResponse(payload) {
   return {
     asset: payload?.asset ?? null,
     horizon: payload?.horizon ?? null,
+    expiryDate: payload?.expiryDate ?? null,
     distribution: payload?.distribution ?? { source: 'none', bins: [] },
     summary: payload?.summary ?? {},
     pathSummary: payload?.pathSummary ?? null,
@@ -16,6 +17,44 @@ export function mapPolymarketResponse(payload) {
     sourceMarkets: Array.isArray(payload?.sourceMarkets) ? payload.sourceMarkets : [],
     pathMarkets: Array.isArray(payload?.pathMarkets) ? payload.pathMarkets : [],
   }
+}
+
+function formatExpiryLabel(value) {
+  if (!value) return 'Unknown'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return String(value)
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
+}
+
+export function buildPolysisExpirySeries(entries) {
+  return (Array.isArray(entries) ? entries : [])
+    .filter((entry) => entry && entry.expiryDate)
+    .map((entry) => {
+      const pathMove = Number(entry?.pathSummary?.pathMovePct)
+      const expectedMove = Number(entry?.summary?.expectedMovePct)
+      const movePct = Number.isFinite(pathMove)
+        ? pathMove
+        : Number.isFinite(expectedMove)
+          ? expectedMove
+          : null
+
+      return {
+        asset: entry.asset ?? null,
+        horizon: entry.horizon ?? null,
+        expiryDate: entry.expiryDate,
+        expiryLabel: formatExpiryLabel(entry.expiryDate),
+        movePct,
+        upPct: Number.isFinite(Number(entry?.pathSummary?.upsidePathPct)) ? Number(entry.pathSummary.upsidePathPct) : null,
+        downPct: Number.isFinite(Number(entry?.pathSummary?.downsidePathPct)) ? Number(entry.pathSummary.downsidePathPct) : null,
+        signalType: Number.isFinite(pathMove) ? 'path' : 'terminal',
+        marketCount: Number(entry?.confidence?.marketCount ?? entry?.sourceMarkets?.length ?? 0),
+      }
+    })
+    .sort((left, right) => new Date(left.expiryDate).getTime() - new Date(right.expiryDate).getTime())
 }
 
 export function buildPolysisDistributionChartData(distribution) {
