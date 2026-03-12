@@ -17,6 +17,7 @@ import {
   sanitizeOptionData
 } from './lib/utils.js';
 import { okxCache, startOkxWebSocket } from './lib/okx-ws.js'
+import { binanceCache, binanceSpotCache, startBinanceWS, setBinanceUpdateCallback } from './lib/binance-ws.js'
 import { startDeribitPolling, buildDeribitResponse } from './lib/deribit.js';
 import { startDeribitWS, setDeribitUpdateCallback } from './lib/deribit-ws.js';
 import { buildDeriveResponse } from './lib/derive.js';
@@ -25,6 +26,7 @@ import { futuresCache, startFuturesPolling } from './lib/futures.js';
 import { analysisCache, updateAnalysisCache } from './lib/analysis.js'
 import { arbCache, updateArbCache } from './lib/arbs.js'
 import { scannerCache, updateScannerCache, computeGammaRows, computeVegaRows } from './lib/scanners.js'
+import { createPolymarketRouteHandler } from './lib/polymarket/service.js'
 
 import { runOptimizer } from './lib/optimizer.js'
 import { createOkxPortfolioService } from './lib/okx-portfolio.js'
@@ -41,6 +43,7 @@ const app = express();
 const PORT = process.env.PORT || 3500;
 const okxPortfolioService = createOkxPortfolioService({ env: process.env })
 const bybitPortfolioService = createBybitPortfolioService({ env: process.env })
+const polymarketRouteHandler = createPolymarketRouteHandler()
 
 // Middleware
 app.use(cors());
@@ -159,7 +162,7 @@ function buildCombinedResponse(baseCoin) {
   const ensure = (key) => {
     if (!merged[key]) merged[key] = {
       bestBid: 0, bestBidEx: null, bestAsk: 0, bestAskEx: null,
-      prices: { bybit: { bid: 0, ask: 0 }, okx: { bid: 0, ask: 0 }, deribit: { bid: 0, ask: 0 } },
+      prices: { bybit: { bid: 0, ask: 0 }, okx: { bid: 0, ask: 0 }, deribit: { bid: 0, ask: 0 }, binance: { bid: 0, ask: 0 } },
       delta: 0, gamma: 0, theta: 0, vega: 0,
       markVol: 0, bidVol: 0, askVol: 0,
     }
@@ -241,6 +244,34 @@ function buildCombinedResponse(baseCoin) {
       }
     }
   }
+  // Binance: prices already in USDT, no conversion needed
+  for (const [symbol, item] of Object.entries(binanceCache[baseCoin] ?? {})) {
+    const parsed = parseBinanceSymbol(symbol)
+    if (!parsed) continue
+    const key   = `${parsed.expiryDate}|${parsed.strikePrice}|${parsed.optionType}`
+    const entry = ensure(key)
+    const bid   = parseFloat(item.bo ?? 0)
+    const ask   = parseFloat(item.ao ?? 0)
+    entry.prices.binance = { bid, ask }
+    if (bid > entry.bestBid) { entry.bestBid = bid; entry.bestBidEx = 'binance' }
+    if (ask > 0 && (entry.bestAsk === 0 || ask < entry.bestAsk)) { entry.bestAsk = ask; entry.bestAskEx = 'binance' }
+    const delta = parseFloat(item.d ?? 0)
+    if (delta !== 0) {
+      entry.delta = delta
+      entry.gamma = parseFloat(item.g ?? 0)
+      entry.theta = parseFloat(item.t ?? 0)
+      entry.vega  = parseFloat(item.v ?? 0)
+    }
+    const bMarkVol = parseFloat(item.vo ?? 0)
+    const bBidVol  = parseFloat(item.b  ?? 0)
+    const bAskVol  = parseFloat(item.a  ?? 0)
+    if (bMarkVol > 0) entry.markVol = bMarkVol
+    if (bBidVol  > 0) entry.bidVol  = bBidVol
+    if (bAskVol  > 0) entry.askVol  = bAskVol
+    const bnSpot = binanceSpotCache[baseCoin] ?? 0
+    if (bnSpot > 0 && !forwardPrices[parsed.expiryDate]) forwardPrices[parsed.expiryDate] = bnSpot
+  }
+
   const optionsByDate = {}
   for (const [key, entry] of Object.entries(merged)) {
     const [expiryDate, strikeStr, optionType] = key.split('|')
@@ -316,6 +347,7 @@ function getDataForExchange(exchange, coin) {
     case 'okx':      return buildOkxResponse(coin)   // coin = 'BTC-USD' etc.
     case 'deribit':  return buildDeribitResponse(coin)
     case 'derive':   return buildDeriveResponse(coin)
+    case 'binance':  return buildBinanceResponse(coin)
     case 'combined': return buildCombinedResponse(coin)
     default:         return null
   }
@@ -694,6 +726,69 @@ async function fetchOkxSpotPrice(instId) {
   }
 }
 
+// ─── Binance Helpers ─────────────────────────────────────────────────────────
+
+function parseBinanceSymbol(symbol) {
+  // Format: BTC-250328-80000-C
+  const parts = symbol.split('-')
+  if (parts.length < 4) return null
+  try {
+    const expRaw = parts[1] // YYMMDD
+    const year  = '20' + expRaw.slice(0, 2)
+    const month = expRaw.slice(2, 4)
+    const day   = expRaw.slice(4, 6)
+    return {
+      expiryDate:  `${year}-${month}-${day}`,
+      strikePrice: parseFloat(parts[2]),
+      optionType:  parts[3] === 'C' ? 'call' : 'put',
+    }
+  } catch {
+    return null
+  }
+}
+
+function buildBinanceResponse(baseCoin) {
+  const cache     = binanceCache[baseCoin]
+  const spotPrice = binanceSpotCache[baseCoin] ?? 0
+  if (!cache || Object.keys(cache).length === 0) return null
+  const optionsByDate = {}
+  for (const [symbol, item] of Object.entries(cache)) {
+    const parsed = parseBinanceSymbol(symbol)
+    if (!parsed) continue
+    const contract = {
+      symbol,
+      strike:            parsed.strikePrice,
+      optionType:        parsed.optionType,
+      bid:               parseFloat(item.bo ?? 0),
+      ask:               parseFloat(item.ao ?? 0),
+      last:              0,
+      volume:            0,
+      bidSize:           parseFloat(item.bq ?? 0),
+      askSize:           parseFloat(item.aq ?? 0),
+      delta:             parseFloat(item.d  ?? 0),
+      gamma:             parseFloat(item.g  ?? 0),
+      theta:             parseFloat(item.t  ?? 0),
+      vega:              parseFloat(item.v  ?? 0),
+      impliedVolatility: parseFloat(item.vo ?? 0),
+      markVol:           parseFloat(item.vo ?? 0),
+      bidVol:            parseFloat(item.b  ?? 0),
+      askVol:            parseFloat(item.a  ?? 0),
+      markPrice:         parseFloat(item.mp ?? 0),
+      openInterest:      0,
+    }
+    const expiry = parsed.expiryDate
+    if (!optionsByDate[expiry]) optionsByDate[expiry] = { calls: [], puts: [], forwardPrice: spotPrice }
+    if (parsed.optionType === 'call') optionsByDate[expiry].calls.push(contract)
+    else                              optionsByDate[expiry].puts.push(contract)
+  }
+  const sortedDates = Object.keys(optionsByDate).sort()
+  const expirationCounts = {}
+  for (const date of sortedDates) {
+    expirationCounts[date] = { calls: optionsByDate[date].calls.length, puts: optionsByDate[date].puts.length }
+  }
+  return { spotPrice, expirations: sortedDates, expirationCounts, data: optionsByDate }
+}
+
 // ─── Bybit Background Cache (REST polling) ────────────────────────────────────
 const bybitTickerCache = { BTC: {}, ETH: {}, SOL: {} }
 const bybitSpotCache   = { BTC: 0,   ETH: 0,   SOL: 0 }
@@ -951,6 +1046,8 @@ app.get('/api/analysis/:exchange/:coin', (req, res) => {
   res.json(cached)
 })
 
+app.get('/api/polymarket/:asset/:horizon', polymarketRouteHandler)
+
 // ─── Arbs Route ───────────────────────────────────────────────────────────────
 
 app.get('/api/arbs/:coin', (req, res) => {
@@ -1035,6 +1132,7 @@ startBybitPolling()
 startDeribitPolling()
 startDeribitWS()
 startFuturesPolling()
+startBinanceWS()
 // Derive WS is demand-driven — started by addDeriveViewer() when first SSE client connects
 
 // ─── SSE Push Callbacks ───────────────────────────────────────────────────────
@@ -1062,6 +1160,21 @@ setInterval(() => {
 
 // Derive WS fires on updates via setDeriveUpdateCallback
 setDeriveUpdateCallback((coin) => emitDerive(coin))
+
+// Binance WS fires on each 1s mark price update
+setBinanceUpdateCallback((coin) => {
+  const data     = buildBinanceResponse(coin)
+  const combined = buildCombinedResponse(coin)
+  if (data)     emitSSE('binance',  coin, data)
+  if (combined) {
+    emitSSE('combined', coin, combined)
+    updateAnalysisCache(`binance:${coin}`,  data,     binanceSpotCache[coin] ?? 0)
+    updateAnalysisCache(`combined:${coin}`, combined, binanceSpotCache[coin] ?? 0)
+    updateScannerCache(`binance:${coin}`,   data,     binanceSpotCache[coin] ?? 0)
+    updateScannerCache(`combined:${coin}`,  combined, binanceSpotCache[coin] ?? 0)
+    updateArbCache(coin, combined, binanceSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
+  }
+})
 
 // Error handling middleware
 app.use((err, req, res, next) => {

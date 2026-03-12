@@ -55,6 +55,9 @@ function buildConfidence(eligibleMarkets) {
   }
 }
 
+const SUPPORTED_ASSETS = new Set(['BTC', 'ETH', 'SOL'])
+const SUPPORTED_HORIZONS = new Set(['daily', 'weekly', 'monthly', 'yearly'])
+
 export function createPolymarketService({
   client = createPolymarketClient(),
   minVolume = 100,
@@ -116,5 +119,30 @@ export function createPolymarketService({
         eligibleMarkets,
       }
     },
+  }
+}
+
+export function createPolymarketRouteHandler({ service = createPolymarketService() } = {}) {
+  return async function polymarketRouteHandler(req, res) {
+    const asset = String(req.params?.asset ?? '').toUpperCase()
+    const horizon = String(req.params?.horizon ?? '').toLowerCase()
+    const spotPrice = Number(req.query?.spotPrice ?? 0) || 0
+
+    if (!SUPPORTED_ASSETS.has(asset)) {
+      return res.status(400).json({ error: `Unsupported asset: ${asset || 'unknown'}` })
+    }
+
+    if (!SUPPORTED_HORIZONS.has(horizon)) {
+      return res.status(400).json({ error: `Unsupported horizon: ${horizon || 'unknown'}` })
+    }
+
+    try {
+      const payload = await service.getAnalysis({ asset, horizon, spotPrice })
+      return res.json(payload)
+    } catch (error) {
+      return res.status(503).json({
+        error: error instanceof Error ? error.message : 'Polymarket data unavailable',
+      })
+    }
   }
 }
