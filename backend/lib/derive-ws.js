@@ -19,6 +19,14 @@ const FAST_EXPIRIES  = 4
 const HEARTBEAT_MS   = 25_000
 const RECONNECT_BASE = 2_000
 const RECONNECT_MAX  = 60_000
+const SUPPORTED_CURRENCIES = ['BTC', 'ETH']
+
+function fetchWithTimeout(url, options = {}, timeoutMs = 10_000) {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeoutMs)
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(id))
+}
 
 // Keyed by instrument_name → raw ticker_slim instrument_ticker object (kept warm)
 export const deriveTickersCache = {}
@@ -28,6 +36,8 @@ export const deriveSpotCache = {}
 
 let _updateCallback = null
 export function setDeriveUpdateCallback(fn) { _updateCallback = fn }
+
+let _webSocketFactory = (url) => new WebSocket(url)
 
 // ─── Module state ─────────────────────────────────────────────────────────────
 
@@ -61,26 +71,22 @@ export function addDeriveViewer(currency) {
   // If WS is mid-connect, ws.on('open') will subscribe all active currencies
 }
 
+export function startDeriveFeed() {
+  if (_ws) return
+  _intentionalClose = false
+  _connect()
+}
+
 export function removeDeriveViewer(currency) {
   viewerCounts[currency] = Math.max(0, (viewerCounts[currency] ?? 0) - 1)
   console.log(`Derive: viewer- ${currency} (now ${viewerCounts[currency]})`)
-
-  if (_totalViewers() === 0) {
-    // Last viewer across all currencies — close WS, keep caches warm
-    console.log('Derive WS: no viewers remaining, closing')
-    _intentionalClose = true
-    _ws?.terminate()
-  } else if (viewerCounts[currency] === 0 && _ws?.readyState === WebSocket.OPEN) {
-    // This currency has no viewers but others still active — unsubscribe it
-    _unsubscribeForCurrency(currency)
-  }
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────
 
 function _connect() {
   console.log('Derive WS: connecting…')
-  _ws = new WebSocket(WS_URL)
+  _ws = _webSocketFactory(WS_URL)
   let heartbeatTimer = null
 
   _ws.on('open', async () => {
@@ -92,12 +98,9 @@ function _connect() {
         _ws.send(JSON.stringify({ method: 'public/heartbeat', params: {}, id: 'hb' }))
     }, HEARTBEAT_MS)
 
-    // Subscribe all currencies that currently have viewers
-    for (const [currency, count] of Object.entries(viewerCounts)) {
-      if (count > 0) {
-        try { await _subscribeForCurrency(currency) }
-        catch (err) { console.error(`Derive WS subscribe error (${currency}):`, err.message) }
-      }
+    for (const currency of SUPPORTED_CURRENCIES) {
+      try { await _subscribeForCurrency(currency) }
+      catch (err) { console.error(`Derive WS subscribe error (${currency}):`, err.message) }
     }
   })
 
@@ -139,10 +142,28 @@ function _connect() {
   })
 }
 
+export function __setDeriveWebSocketFactoryForTests(factory) {
+  _webSocketFactory = factory
+}
+
+export function __resetDeriveStateForTests() {
+  _intentionalClose = true
+  _ws?.terminate?.()
+  _ws = null
+  _intentionalClose = false
+  _reconnectDelay = RECONNECT_BASE
+  _updateCallback = null
+  _webSocketFactory = (url) => new WebSocket(url)
+  for (const key of Object.keys(viewerCounts)) delete viewerCounts[key]
+  for (const key of Object.keys(instrumentsCache)) delete instrumentsCache[key]
+  for (const key of Object.keys(deriveTickersCache)) delete deriveTickersCache[key]
+  for (const key of Object.keys(deriveSpotCache)) delete deriveSpotCache[key]
+}
+
 async function _subscribeForCurrency(currency) {
   // Fetch + cache instrument names if not already done
   if (!instrumentsCache[currency]) {
-    const res  = await fetch(`${DERIVE_REST}/public/get_all_instruments`, {
+    const res  = await fetchWithTimeout(`${DERIVE_REST}/public/get_all_instruments`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'options-viewer/1.0' },
       body: JSON.stringify({ expired: false, instrument_type: 'option', currency, page_size: 1000 }),
@@ -211,7 +232,7 @@ async function _bootstrapTickers(currency, names) {
   }
   for (const expiryDate of expirySet) {
     try {
-      const res  = await fetch(`${DERIVE_REST}/public/get_tickers`, {
+      const res  = await fetchWithTimeout(`${DERIVE_REST}/public/get_tickers`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'User-Agent': 'options-viewer/1.0' },
         body: JSON.stringify({ instrument_type: 'option', currency, expiry_date: expiryDate }),
@@ -229,7 +250,7 @@ async function _bootstrapTickers(currency, names) {
 
 async function _bootstrapSpot(currency) {
   try {
-    const res  = await fetch(`${DERIVE_REST}/public/get_ticker`, {
+    const res  = await fetchWithTimeout(`${DERIVE_REST}/public/get_ticker`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'User-Agent': 'options-viewer/1.0' },
       body: JSON.stringify({ instrument_name: `${currency}-PERP` }),

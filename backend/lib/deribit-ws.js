@@ -21,6 +21,13 @@ const RECONNECT_BASE_MS = 2_000
 const RECONNECT_MAX_MS = 60_000
 const CHUNK = 200  // channels per subscribe message
 
+function fetchWithTimeout(url, options = {}, timeoutMs = 10_000) {
+  const controller = new AbortController()
+  const id = setTimeout(() => controller.abort(), timeoutMs)
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(id))
+}
+
 // Keyed by instrument_name: { delta, gamma, theta, vega, rho, bid_iv, ask_iv }
 export const deribitGreeksCache = {}
 
@@ -29,7 +36,7 @@ export function setDeribitUpdateCallback(fn) { _updateCallback = fn }
 
 async function fetchInstruments({ apiCurrency, prefix }) {
   const url = `${DERIBIT_REST}/public/get_instruments?currency=${apiCurrency}&kind=option&expired=false`
-  const res = await fetch(url, { headers: { 'User-Agent': 'deribit-options-viewer/1.0' } })
+  const res = await fetchWithTimeout(url, { headers: { 'User-Agent': 'deribit-options-viewer/1.0' } })
   const json = await res.json()
   const all = json.result?.map(i => i.instrument_name) ?? []
   return prefix ? all.filter(name => name.startsWith(prefix)) : all
