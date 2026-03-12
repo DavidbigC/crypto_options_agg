@@ -184,6 +184,9 @@ function buildCombinedResponse(baseCoin) {
 const sseClients = new Map() // key: 'exchange:coin' → Map<ServerResponse, {expiry}>
 const polymarketTokenAssetMap = new Map()
 
+const VALID_EXCHANGES = new Set(['bybit', 'okx', 'deribit', 'derive', 'binance', 'combined'])
+const VALID_COINS     = new Set(['BTC', 'ETH', 'SOL'])
+
 // Filter full response down to a single expiry's data (keeps metadata intact).
 // Reduces payload from ~220KB to ~30KB when a client is watching one expiry.
 function filterByExpiry(data, expiry) {
@@ -958,6 +961,13 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
   const exchange = req.params.exchange
   const coin     = req.params.coin.toUpperCase()
   const expiry   = req.query.expiry || null  // optional: filter pushes to one expiry
+
+  if (!VALID_EXCHANGES.has(exchange)) {
+    return res.status(400).json({ error: `Unknown exchange: ${exchange}` })
+  }
+  if (!VALID_COINS.has(coin)) {
+    return res.status(400).json({ error: `Unknown coin: ${coin}` })
+  }
 
   res.setHeader('Content-Type',  'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
