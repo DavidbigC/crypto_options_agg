@@ -197,6 +197,10 @@ function emitSSE(exchange, coin, data) {
   if (!clients?.size) return
   const payload = JSON.stringify(data)
   for (const [res, opts] of clients.entries()) {
+    if (res.writableEnded) {
+      clients.delete(res)
+      continue
+    }
     try {
       const out = opts.expiry ? `data: ${JSON.stringify(filterByExpiry(data, opts.expiry))}\n\n` : `data: ${payload}\n\n`
       res.write(out)
