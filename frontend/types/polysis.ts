@@ -39,6 +39,7 @@ export type PolysisSourceMarket = {
   question: string
   endDate?: string | null
   tokenId?: string | null
+  tokenIds?: string[]
   lastTradePrice?: number
   volumeNum?: number
   openInterest?: number

@@ -265,6 +265,41 @@ test('createPolymarketService falls back to outcomePrices when CLOB pricing fail
   assert.equal(result.sourceMarkets[0].classification.type, 'threshold')
 })
 
+test('createPolymarketService picks the live token price closest to the static yes probability', async () => {
+  const service = createPolymarketService({
+    livePriceLookup: (tokenId) => {
+      if (tokenId === 'yes-token') return 0.08
+      if (tokenId === 'no-token') return 0.92
+      return null
+    },
+    client: {
+      searchGamma: async () => ({
+        events: [{
+          slug: 'btc-weekly-path',
+          title: 'Bitcoin weekly path',
+          endDate: '2026-03-16T04:00:00Z',
+          tags: [{ slug: 'bitcoin' }, { slug: 'weekly' }],
+          markets: [{
+            id: 'm1',
+            question: 'Will Bitcoin reach $76,000 March 9-15?',
+            volumeNum: 5000,
+            spread: 0.01,
+            lastTradePrice: 0.08,
+            outcomePrices: '["0.08","0.92"]',
+            clobTokenIds: '["no-token","yes-token"]',
+          }],
+        }],
+      }),
+      getClobPrices: async () => ({}),
+      getOpenInterest: async () => ([{ value: 5000 }]),
+    },
+  })
+
+  const result = await service.getAnalysis({ asset: 'BTC', horizon: 'weekly', spotPrice: 70000 })
+
+  assert.equal(result.sourceMarkets[0].lastTradePrice, 0.08)
+})
+
 test('createPolymarketService getSurface returns all supported horizons', async () => {
   const service = createPolymarketService({
     now: () => Date.parse('2026-03-12T10:00:00Z'),

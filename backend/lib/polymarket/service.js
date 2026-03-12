@@ -33,20 +33,41 @@ function parseOutcomeProbability(market = {}) {
   return null
 }
 
-function resolveTokenId(market = {}) {
+function resolveTokenIds(market = {}) {
   if (Array.isArray(market.clobTokenIds) && market.clobTokenIds.length) {
-    return String(market.clobTokenIds[0])
+    return market.clobTokenIds.map((tokenId) => String(tokenId)).filter(Boolean)
   }
   if (typeof market.clobTokenIds === 'string' && market.clobTokenIds.trim()) {
     try {
       const parsed = JSON.parse(market.clobTokenIds)
-      if (Array.isArray(parsed) && parsed.length) return String(parsed[0])
+      if (Array.isArray(parsed) && parsed.length) return parsed.map((tokenId) => String(tokenId)).filter(Boolean)
     } catch {}
   }
   if (market.clobTokenId !== undefined && market.clobTokenId !== null) {
-    return String(market.clobTokenId)
+    return [String(market.clobTokenId)]
   }
-  return null
+  return []
+}
+
+function resolveLivePrice(tokenIds, referenceProbability, livePriceLookup) {
+  const rawPrices = (Array.isArray(tokenIds) ? tokenIds : [])
+    .map((tokenId) => {
+      const value = livePriceLookup(tokenId)
+      return Number.isFinite(value) ? Number(value) : Number.NaN
+    })
+    .filter((price) => Number.isFinite(price))
+
+  const candidates = rawPrices.flatMap((price) => {
+    const complement = Number((1 - price).toFixed(6))
+    return [price, complement]
+  })
+
+  if (!candidates.length) return Number.NaN
+  if (!Number.isFinite(referenceProbability)) return candidates[0]
+
+  return candidates.reduce((best, price) => (
+    Math.abs(price - referenceProbability) < Math.abs(best - referenceProbability) ? price : best
+  ), candidates[0])
 }
 
 function confidenceLabel(score) {
@@ -240,12 +261,12 @@ export function createPolymarketService({
   async function buildSourceMarkets(selectedMarkets) {
     const missingPriceTokenIds = selectedMarkets
       .filter((market) => {
-        const tokenId = resolveTokenId(market)
+        const tokenIds = resolveTokenIds(market)
         return !Number.isFinite(Number(market.lastTradePrice))
           && !Number.isFinite(parseOutcomeProbability(market))
-          && !Number.isFinite(livePriceLookup(tokenId))
+          && !tokenIds.some((tokenId) => Number.isFinite(livePriceLookup(tokenId)))
       })
-      .map(resolveTokenId)
+      .flatMap(resolveTokenIds)
       .filter(Boolean)
 
     let prices = {}
@@ -258,18 +279,22 @@ export function createPolymarketService({
     }
 
     return Promise.all(selectedMarkets.map(async (market) => {
-      const tokenId = resolveTokenId(market)
+      const tokenIds = resolveTokenIds(market)
       const classification = classifyPolymarketMarket(market)
       const fallbackProbability = parseOutcomeProbability(market)
-      const livePrice = tokenId ? livePriceLookup(tokenId) : null
-      const wsPrice = Number.isFinite(livePrice) ? Number(livePrice) : Number.NaN
+      const wsPrice = resolveLivePrice(tokenIds, Number.isFinite(fallbackProbability) ? fallbackProbability : Number(market.lastTradePrice), livePriceLookup)
       const gammaPrice = Number(market.lastTradePrice)
-      const clobPrice = tokenId ? Number(prices[tokenId]) : Number.NaN
+      const clobPrice = tokenIds.length
+        ? tokenIds
+          .map((tokenId) => Number(prices[tokenId]))
+          .find((price) => Number.isFinite(price))
+        : Number.NaN
       return {
         id: market.id,
         slug: market.slug ?? null,
         question: market.question ?? market.title ?? '',
-        tokenId,
+        tokenId: tokenIds[0] ?? null,
+        tokenIds,
         endDate: market.event?.endDate ?? market.endDate ?? null,
         lastTradePrice: Number.isFinite(wsPrice)
           ? wsPrice

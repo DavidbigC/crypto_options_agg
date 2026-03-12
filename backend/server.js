@@ -356,7 +356,7 @@ async function emitPolymarketSurface(asset) {
       registerPolymarketAssetTokens(asset, surface)
       subscribePolymarketAssetIds(
         Object.values(surface?.horizons ?? {}).flatMap((horizon) =>
-          (horizon?.sourceMarkets ?? []).map((market) => market.tokenId).filter(Boolean),
+          (horizon?.sourceMarkets ?? []).flatMap((market) => market.tokenIds ?? (market.tokenId ? [market.tokenId] : [])).filter(Boolean),
         ),
       )
       res.write(`data: ${JSON.stringify(surface)}\n\n`)
@@ -1040,7 +1040,7 @@ app.get('/api/stream/polymarket/:asset', async (req, res) => {
     registerPolymarketAssetTokens(asset, surface)
     subscribePolymarketAssetIds(
       Object.values(surface?.horizons ?? {}).flatMap((horizon) =>
-        (horizon?.sourceMarkets ?? []).map((market) => market.tokenId).filter(Boolean),
+        (horizon?.sourceMarkets ?? []).flatMap((market) => market.tokenIds ?? (market.tokenId ? [market.tokenId] : [])).filter(Boolean),
       ),
     )
     res.write(`data: ${JSON.stringify(surface)}\n\n`)
