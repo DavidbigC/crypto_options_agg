@@ -9,7 +9,13 @@ import { WebSocket } from 'ws'
 
 const WS_URL = 'wss://www.deribit.com/ws/api/v2'
 const DERIBIT_REST = 'https://www.deribit.com/api/v2'
-const CURRENCIES = ['BTC', 'ETH', 'SOL_USDC']
+// Maps logical currency → { apiCurrency, prefix }
+// SOL options are USDC-settled: listed under currency=USDC with SOL_USDC- prefix
+const CURRENCIES = [
+  { key: 'BTC',      apiCurrency: 'BTC',  prefix: null       },
+  { key: 'ETH',      apiCurrency: 'ETH',  prefix: null       },
+  { key: 'SOL_USDC', apiCurrency: 'USDC', prefix: 'SOL_USDC' },
+]
 const HEARTBEAT_MS = 25_000
 const RECONNECT_BASE_MS = 2_000
 const RECONNECT_MAX_MS = 60_000
@@ -21,11 +27,12 @@ export const deribitGreeksCache = {}
 let _updateCallback = null
 export function setDeribitUpdateCallback(fn) { _updateCallback = fn }
 
-async function fetchInstruments(currency) {
-  const url = `${DERIBIT_REST}/public/get_instruments?currency=${currency}&kind=option&expired=false`
+async function fetchInstruments({ apiCurrency, prefix }) {
+  const url = `${DERIBIT_REST}/public/get_instruments?currency=${apiCurrency}&kind=option&expired=false`
   const res = await fetch(url, { headers: { 'User-Agent': 'deribit-options-viewer/1.0' } })
   const json = await res.json()
-  return json.result?.map(i => i.instrument_name) ?? []
+  const all = json.result?.map(i => i.instrument_name) ?? []
+  return prefix ? all.filter(name => name.startsWith(prefix)) : all
 }
 
 export function startDeribitWS() {
@@ -46,26 +53,31 @@ export function startDeribitWS() {
         }
       }, HEARTBEAT_MS)
 
-      try {
-        const allInstruments = []
-        for (const currency of CURRENCIES) {
-          const instruments = await fetchInstruments(currency)
+      const allInstruments = []
+      for (const cur of CURRENCIES) {
+        try {
+          const instruments = await fetchInstruments(cur)
           allInstruments.push(...instruments)
+        } catch (err) {
+          console.error(`Deribit WS: failed to fetch ${cur.key} instruments:`, err.message)
         }
-
-        const channels = allInstruments.map(i => `ticker.${i}.100ms`)
-        for (let i = 0; i < channels.length; i += CHUNK) {
-          ws.send(JSON.stringify({
-            jsonrpc: '2.0',
-            method: 'public/subscribe',
-            params: { channels: channels.slice(i, i + CHUNK) },
-            id: `sub-${i}`,
-          }))
-        }
-        console.log(`Deribit WS: subscribed to ${channels.length} ticker channels`)
-      } catch (err) {
-        console.error('Deribit WS subscribe error:', err.message)
       }
+
+      if (allInstruments.length === 0) {
+        console.error('Deribit WS: no instruments fetched, will retry on reconnect')
+        return
+      }
+
+      const channels = allInstruments.map(i => `ticker.${i}.100ms`)
+      for (let i = 0; i < channels.length; i += CHUNK) {
+        ws.send(JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'public/subscribe',
+          params: { channels: channels.slice(i, i + CHUNK) },
+          id: `sub-${i}`,
+        }))
+      }
+      console.log(`Deribit WS: subscribed to ${channels.length} ticker channels`)
     })
 
     ws.on('message', (raw) => {
