@@ -211,6 +211,10 @@ function emitSSE(exchange, coin, data) {
   }
 }
 
+function hasSSEClients(exchange, coin) {
+  return (sseClients.get(`${exchange}:${coin}`)?.size ?? 0) > 0
+}
+
 function registerPolymarketAssetTokens(asset, surface) {
   const horizons = Object.values(surface?.horizons ?? {})
   for (const horizon of horizons) {
@@ -758,12 +762,16 @@ async function pollBybit(coin) {
     if (spot > 0) bybitSpotCache[coin] = spot
     const data = buildBybitResponse(coin)
     if (data) {
-      const combined = buildCombinedResponse(coin)
-      emitSSE('bybit',    coin, data)
-      emitSSE('combined', coin, combined)
+      emitSSE('bybit', coin, data)
       updateAnalysisCache(`bybit:${coin}`, data, bybitSpotCache[coin] ?? 0)
       updateScannerCache(`bybit:${coin}`, data, bybitSpotCache[coin] ?? 0)
-      if (combined) updateArbCache(coin, combined, bybitSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
+      if (hasSSEClients('combined', coin)) {
+        const combined = buildCombinedResponse(coin)
+        if (combined) {
+          emitSSE('combined', coin, combined)
+          updateArbCache(coin, combined, bybitSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
+        }
+      }
     }
   } catch (err) {
     console.error(`Bybit REST poll error (${coin}):`, err.message)
@@ -801,12 +809,16 @@ async function pollOkxTickers(instFamily) {
     }
     const coin = instFamily.split('-')[0]
     const okxResp = buildOkxResponse(instFamily)
-    const combined = buildCombinedResponse(coin)
-    emitSSE('okx',      instFamily, okxResp)
-    emitSSE('combined', coin,       combined)
+    emitSSE('okx', instFamily, okxResp)
     updateAnalysisCache(`okx:${instFamily}`, okxResp, okxSpotCache[`${coin}-USDT`] ?? 0)
     updateScannerCache(`okx:${instFamily}`, okxResp, okxSpotCache[`${coin}-USDT`] ?? 0)
-    if (combined) updateArbCache(coin, combined, okxSpotCache[`${coin}-USDT`] ?? 0, futuresCache[coin] ?? [])
+    if (hasSSEClients('combined', coin)) {
+      const combined = buildCombinedResponse(coin)
+      if (combined) {
+        emitSSE('combined', coin, combined)
+        updateArbCache(coin, combined, okxSpotCache[`${coin}-USDT`] ?? 0, futuresCache[coin] ?? [])
+      }
+    }
   } catch (err) {
     console.error(`OKX ticker poll error (${instFamily}):`, err.message);
   }
@@ -1112,14 +1124,19 @@ setDeribitUpdateCallback((coin) => emitDeribit(coin))
 const _deribitPollInterval = setInterval(() => {
   for (const coin of ['BTC', 'ETH', 'SOL']) {
     const data = buildDeribitResponse(coin)
-    if (data) {
+    if (!data) continue
+    emitSSE('deribit', coin, data)
+    updateAnalysisCache(`deribit:${coin}`, data, bybitSpotCache[coin] ?? 0)
+    updateScannerCache(`deribit:${coin}`, data, bybitSpotCache[coin] ?? 0)
+
+    if (hasSSEClients('combined', coin)) {
       const combinedResp = buildCombinedResponse(coin)
-      emitSSE('deribit', coin, data)
-      updateAnalysisCache(`deribit:${coin}`, data, bybitSpotCache[coin] ?? 0)
-      updateAnalysisCache(`combined:${coin}`, combinedResp, bybitSpotCache[coin] ?? 0)
-      updateScannerCache(`deribit:${coin}`, data, bybitSpotCache[coin] ?? 0)
-      updateScannerCache(`combined:${coin}`, combinedResp, bybitSpotCache[coin] ?? 0)
-      if (combinedResp) updateArbCache(coin, combinedResp, bybitSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
+      if (combinedResp) {
+        emitSSE('combined', coin, combinedResp)
+        updateAnalysisCache(`combined:${coin}`, combinedResp, bybitSpotCache[coin] ?? 0)
+        updateScannerCache(`combined:${coin}`, combinedResp, bybitSpotCache[coin] ?? 0)
+        updateArbCache(coin, combinedResp, bybitSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
+      }
     }
   }
 }, 5000)
@@ -1129,16 +1146,20 @@ setDeriveUpdateCallback((coin) => emitDerive(coin))
 
 // Binance WS fires on each 1s mark price update
 setBinanceUpdateCallback((coin) => {
-  const data     = buildBinanceResponse(coin)
-  const combined = buildCombinedResponse(coin)
-  if (data)     emitSSE('binance',  coin, data)
-  if (combined) {
-    emitSSE('combined', coin, combined)
-    updateAnalysisCache(`binance:${coin}`,  data,     binanceSpotCache[coin] ?? 0)
-    updateAnalysisCache(`combined:${coin}`, combined, binanceSpotCache[coin] ?? 0)
-    updateScannerCache(`binance:${coin}`,   data,     binanceSpotCache[coin] ?? 0)
-    updateScannerCache(`combined:${coin}`,  combined, binanceSpotCache[coin] ?? 0)
-    updateArbCache(coin, combined, binanceSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
+  const data = buildBinanceResponse(coin)
+  if (data) {
+    emitSSE('binance', coin, data)
+    updateAnalysisCache(`binance:${coin}`, data, binanceSpotCache[coin] ?? 0)
+    updateScannerCache(`binance:${coin}`, data, binanceSpotCache[coin] ?? 0)
+  }
+  if (hasSSEClients('combined', coin)) {
+    const combined = buildCombinedResponse(coin)
+    if (combined) {
+      emitSSE('combined', coin, combined)
+      updateAnalysisCache(`combined:${coin}`, combined, binanceSpotCache[coin] ?? 0)
+      updateScannerCache(`combined:${coin}`, combined, binanceSpotCache[coin] ?? 0)
+      updateArbCache(coin, combined, binanceSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
+    }
   }
 })
 
