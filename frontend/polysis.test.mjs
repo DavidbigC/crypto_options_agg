@@ -28,6 +28,14 @@ test('mapPolymarketResponse preserves the expected core shape', () => {
       score: 78,
       label: 'high',
     },
+    pathSummary: {
+      pathMovePct: 8.75,
+      pathMoveUsd: 7000,
+      upsidePathPct: 5,
+      downsidePathPct: 3.75,
+      strongestUpsideBarrier: 90000,
+      strongestDownsideBarrier: 70000,
+    },
     repricing: {
       change24h: null,
       change7d: null,
@@ -40,6 +48,7 @@ test('mapPolymarketResponse preserves the expected core shape', () => {
   assert.equal(result.asset, 'BTC')
   assert.equal(result.horizon, 'weekly')
   assert.equal(result.summary.expectedPrice, 82200)
+  assert.equal(result.pathSummary.pathMovePct, 8.75)
   assert.equal(result.sourceMarkets[0].classification.type, 'range')
 })
 

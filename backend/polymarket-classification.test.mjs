@@ -48,6 +48,17 @@ test('classifyPolymarketMarket detects reach phrasing as a path market', () => {
   assert.equal(result.confidence, 'high')
 })
 
+test('classifyPolymarketMarket detects dip phrasing as a downside path market', () => {
+  const result = classifyPolymarketMarket({
+    question: 'Will Bitcoin dip to $69,000 on March 12?',
+  })
+
+  assert.equal(result.type, 'path')
+  assert.equal(result.direction, 'below')
+  assert.equal(result.barrier, 69000)
+  assert.equal(result.confidence, 'high')
+})
+
 test('classifyPolymarketMarket rejects ambiguous titles', () => {
   const result = classifyPolymarketMarket({
     question: 'How high will BTC go this week?',

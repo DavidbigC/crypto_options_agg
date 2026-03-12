@@ -25,6 +25,11 @@ function formatPercent(value: number | null | undefined) {
   return `${value.toFixed(2)}%`
 }
 
+function formatBarrier(value: number | null | undefined) {
+  if (value === null || value === undefined || Number.isNaN(value)) return 'N/A'
+  return `$${Math.round(value).toLocaleString('en-US')}`
+}
+
 function marketTypeLabel(market: PolysisSourceMarket) {
   const type = market.classification?.type ?? 'unknown'
   if (type === 'range') return 'Range'
@@ -106,7 +111,9 @@ export default function PolysisPage() {
   const topProbability = distributionRows.reduce((max, row) => Math.max(max, row.probability), 0)
   const sourceMarkets = payload?.sourceMarkets ?? []
   const pathMarkets = payload?.pathMarkets ?? []
+  const pathSummary = payload?.pathSummary ?? null
   const eligibleCount = payload?.confidence?.marketCount ?? sourceMarkets.length
+  const showPathHero = Boolean(pathMarkets.length && pathSummary?.pathMovePct !== null)
 
   return (
     <div className="min-h-screen bg-surface">
@@ -205,21 +212,37 @@ export default function PolysisPage() {
 
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Expected Price</div>
-                <div className="mt-2 text-lg font-semibold text-ink">{formatUsd(payload?.summary?.expectedPrice)}</div>
-              </div>
-              <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Expected Move</div>
-                <div className="mt-2 text-lg font-semibold text-ink">{formatUsd(payload?.summary?.expectedMove)}</div>
-                <div className="text-xs text-ink-3">{formatPercent(payload?.summary?.expectedMovePct)}</div>
-              </div>
-              <div className="rounded-lg border border-rim bg-muted/40 p-3">
-                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Most Likely Range</div>
+                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">
+                  {showPathHero ? 'Path Move' : 'Expected Price'}
+                </div>
                 <div className="mt-2 text-lg font-semibold text-ink">
-                  {payload?.summary?.mostLikelyRange
+                  {showPathHero ? formatPercent(pathSummary?.pathMovePct) : formatUsd(payload?.summary?.expectedPrice)}
+                </div>
+                {showPathHero && <div className="text-xs text-ink-3">{formatUsd(pathSummary?.pathMoveUsd)}</div>}
+              </div>
+              <div className="rounded-lg border border-rim bg-muted/40 p-3">
+                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">
+                  {showPathHero ? 'Up Path' : 'Expected Move'}
+                </div>
+                <div className="mt-2 text-lg font-semibold text-ink">
+                  {showPathHero ? formatPercent(pathSummary?.upsidePathPct) : formatUsd(payload?.summary?.expectedMove)}
+                </div>
+                <div className="text-xs text-ink-3">
+                  {showPathHero ? `Barrier ${formatBarrier(pathSummary?.strongestUpsideBarrier)}` : formatPercent(payload?.summary?.expectedMovePct)}
+                </div>
+              </div>
+              <div className="rounded-lg border border-rim bg-muted/40 p-3">
+                <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">
+                  {showPathHero ? 'Down Path' : 'Most Likely Range'}
+                </div>
+                <div className="mt-2 text-lg font-semibold text-ink">
+                  {showPathHero
+                    ? formatPercent(pathSummary?.downsidePathPct)
+                    : payload?.summary?.mostLikelyRange
                     ? `${formatUsd(payload.summary.mostLikelyRange.low)}-${formatUsd(payload.summary.mostLikelyRange.high)}`
                     : 'N/A'}
                 </div>
+                {showPathHero && <div className="text-xs text-ink-3">Barrier {formatBarrier(pathSummary?.strongestDownsideBarrier)}</div>}
               </div>
               <div className="rounded-lg border border-rim bg-muted/40 p-3">
                 <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Repricing</div>
@@ -244,7 +267,7 @@ export default function PolysisPage() {
 
             <div className="rounded-xl border border-rim bg-card">
               <div className="border-b border-rim px-4 py-3">
-                <h3 className="text-sm font-semibold text-ink">Distribution Ladder</h3>
+                <h3 className="text-sm font-semibold text-ink">{showPathHero ? 'Terminal Ladder' : 'Distribution Ladder'}</h3>
               </div>
               <div className="divide-y divide-rim">
                 {!distributionRows.length && (

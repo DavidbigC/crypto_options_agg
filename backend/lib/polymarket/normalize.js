@@ -53,12 +53,26 @@ export function classifyPolymarketMarket(market = {}) {
     }
   }
 
+  const dipMatch = question.match(/\b(?:dip(?:\s+to)?|drop(?:\s+to)?|fall(?:\s+to)?)\s+\$?\s*([\d,.]+k?)/i)
+  if (dipMatch) {
+    const barrier = parseDollarNumber(dipMatch[1])
+    if (barrier !== null) {
+      return {
+        type: 'path',
+        direction: 'below',
+        barrier,
+        confidence: 'high',
+      }
+    }
+  }
+
   const pathMatch = question.match(/\b(?:hit|touch|reach)\s+\$?\s*([\d,.]+k?)/i)
   if (pathMatch) {
     const barrier = parseDollarNumber(pathMatch[1])
     if (barrier !== null) {
       return {
         type: 'path',
+        direction: 'above',
         barrier,
         confidence: 'high',
       }
@@ -179,5 +193,87 @@ export function summarizeDistribution(distribution, spotPrice) {
     expectedMove: Math.round(expectedMove),
     expectedMovePct: Number(((expectedMove / spotPrice) * 100).toFixed(2)),
     mostLikelyRange,
+  }
+}
+
+export function summarizePathMarkets(markets = [], spotPrice) {
+  if (!Number.isFinite(spotPrice) || spotPrice <= 0) {
+    return {
+      pathMovePct: null,
+      pathMoveUsd: null,
+      upsidePathPct: null,
+      downsidePathPct: null,
+      strongestUpsideBarrier: null,
+      strongestDownsideBarrier: null,
+    }
+  }
+
+  const classified = markets
+    .map(toDistributionEntry)
+    .filter((market) => market.type === 'path' && Number.isFinite(market.barrier))
+
+  if (!classified.length) {
+    return {
+      pathMovePct: null,
+      pathMoveUsd: null,
+      upsidePathPct: null,
+      downsidePathPct: null,
+      strongestUpsideBarrier: null,
+      strongestDownsideBarrier: null,
+    }
+  }
+
+  let upsidePathPct = 0
+  let downsidePathPct = 0
+  let strongestUpsideBarrier = null
+  let strongestDownsideBarrier = null
+  let strongestUpsideProbability = -1
+  let strongestDownsideProbability = -1
+
+  const upsideMarkets = classified
+    .filter((market) => Number(market.barrier) > spotPrice && market.direction !== 'below')
+    .sort((a, b) => Number(a.barrier) - Number(b.barrier))
+
+  for (let index = 0; index < upsideMarkets.length; index++) {
+    const market = upsideMarkets[index]
+    const nextProbability = index + 1 < upsideMarkets.length
+      ? clampProbability(upsideMarkets[index + 1].probability)
+      : 0
+    const marginalProbability = Math.max(0, clampProbability(market.probability) - nextProbability)
+    const barrier = Number(market.barrier)
+    upsidePathPct += marginalProbability * ((barrier / spotPrice) - 1) * 100
+    if (clampProbability(market.probability) > strongestUpsideProbability) {
+      strongestUpsideProbability = clampProbability(market.probability)
+      strongestUpsideBarrier = barrier
+    }
+  }
+
+  const downsideMarkets = classified
+    .filter((market) => Number(market.barrier) < spotPrice && market.direction === 'below')
+    .sort((a, b) => Number(b.barrier) - Number(a.barrier))
+
+  for (let index = 0; index < downsideMarkets.length; index++) {
+    const market = downsideMarkets[index]
+    const nextProbability = index + 1 < downsideMarkets.length
+      ? clampProbability(downsideMarkets[index + 1].probability)
+      : 0
+    const marginalProbability = Math.max(0, clampProbability(market.probability) - nextProbability)
+    const barrier = Number(market.barrier)
+    downsidePathPct += marginalProbability * (1 - (barrier / spotPrice)) * 100
+    if (clampProbability(market.probability) > strongestDownsideProbability) {
+      strongestDownsideProbability = clampProbability(market.probability)
+      strongestDownsideBarrier = barrier
+    }
+  }
+
+  const pathMovePct = upsidePathPct + downsidePathPct
+
+  return {
+    pathMovePct: Number(pathMovePct.toFixed(2)),
+    pathMoveUsd: Math.round((pathMovePct / 100) * spotPrice),
+    upsidePathPct: Number(upsidePathPct.toFixed(2)),
+    downsidePathPct: Number(downsidePathPct.toFixed(2)),
+    strongestUpsideBarrier,
+    strongestDownsideBarrier,
   }
 }

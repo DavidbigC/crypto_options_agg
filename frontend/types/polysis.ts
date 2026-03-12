@@ -24,6 +24,15 @@ export type PolysisConfidence = {
   totalOpenInterest?: number
 }
 
+export type PolysisPathSummary = {
+  pathMovePct: number | null
+  pathMoveUsd: number | null
+  upsidePathPct: number | null
+  downsidePathPct: number | null
+  strongestUpsideBarrier: number | null
+  strongestDownsideBarrier: number | null
+}
+
 export type PolysisSourceMarket = {
   id: string
   slug?: string | null
@@ -49,6 +58,7 @@ export type PolysisResponse = {
   horizon: 'daily' | 'weekly' | 'monthly' | 'yearly'
   distribution: PolysisDistribution
   summary: PolysisSummary
+  pathSummary: PolysisPathSummary | null
   confidence: PolysisConfidence | null
   repricing: {
     change24h: number | null

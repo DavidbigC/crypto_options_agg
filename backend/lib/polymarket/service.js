@@ -4,6 +4,7 @@ import {
   classifyPolymarketMarket,
   extractPolymarketAsset,
   extractPolymarketHorizon,
+  summarizePathMarkets,
   summarizeDistribution,
 } from './normalize.js'
 
@@ -225,6 +226,7 @@ export function createPolymarketService({
 
       const distribution = buildDistributionFromMarkets(eligibleMarkets)
       const summary = summarizeDistribution(distribution, spotPrice)
+      const pathSummary = summarizePathMarkets(pathMarkets, spotPrice)
       const confidence = buildConfidence(eligibleMarkets)
 
       return {
@@ -233,6 +235,7 @@ export function createPolymarketService({
         distribution,
         summary,
         confidence,
+        pathSummary,
         repricing: {
           change24h: null,
           change7d: null,

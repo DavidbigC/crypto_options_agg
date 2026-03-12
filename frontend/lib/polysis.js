@@ -10,9 +10,11 @@ export function mapPolymarketResponse(payload) {
     horizon: payload?.horizon ?? null,
     distribution: payload?.distribution ?? { source: 'none', bins: [] },
     summary: payload?.summary ?? {},
+    pathSummary: payload?.pathSummary ?? null,
     confidence: payload?.confidence ?? null,
     repricing: payload?.repricing ?? { change24h: null, change7d: null },
     sourceMarkets: Array.isArray(payload?.sourceMarkets) ? payload.sourceMarkets : [],
+    pathMarkets: Array.isArray(payload?.pathMarkets) ? payload.pathMarkets : [],
   }
 }
 

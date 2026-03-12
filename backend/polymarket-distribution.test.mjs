@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildDistributionFromMarkets,
+  summarizePathMarkets,
   summarizeDistribution,
 } from './lib/polymarket/normalize.js'
 
@@ -63,4 +64,19 @@ test('summarizeDistribution returns expected price, expected move, and most like
   assert.equal(summary.expectedMove, 200)
   assert.equal(summary.expectedMovePct, 0.24)
   assert.deepEqual(summary.mostLikelyRange, { low: 82000, high: 84000, probability: 0.5 })
+})
+
+test('summarizePathMarkets returns a single path move metric with upside and downside components', () => {
+  const summary = summarizePathMarkets([
+    { question: 'Will Bitcoin reach $90,000 in March?', lastTradePrice: 0.2 },
+    { question: 'Will Bitcoin reach $100,000 in March?', lastTradePrice: 0.1 },
+    { question: 'Will Bitcoin dip to $70,000 in March?', lastTradePrice: 0.3 },
+  ], 80000)
+
+  assert.equal(summary.pathMovePct, 7.5)
+  assert.equal(summary.pathMoveUsd, 6000)
+  assert.equal(summary.upsidePathPct, 3.75)
+  assert.equal(summary.downsidePathPct, 3.75)
+  assert.equal(summary.strongestUpsideBarrier, 90000)
+  assert.equal(summary.strongestDownsideBarrier, 70000)
 })
