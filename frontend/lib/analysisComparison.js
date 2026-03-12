@@ -13,6 +13,15 @@ function indexRowsByExpiry(rows = [], valueKey) {
   return map
 }
 
+function formatExpiryLabel(exp) {
+  return new Date(exp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function average(values) {
+  if (!values.length) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
 export function buildTermStructureChartData(datasets, overlays, mode = 'level') {
   const combinedRows = datasets.combined?.termStructure ?? []
   return combinedRows.map((row) => {
