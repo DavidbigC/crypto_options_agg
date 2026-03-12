@@ -26,6 +26,7 @@ export type PolysisConfidence = {
 
 export type PolysisSourceMarket = {
   id: string
+  slug?: string | null
   question: string
   tokenId?: string | null
   lastTradePrice?: number

@@ -39,6 +39,13 @@ export function assertGammaMarketsResponse(payload) {
   return payload
 }
 
+export function assertGammaSearchResponse(payload) {
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.events)) {
+    throw new Error('Expected Gamma search response to have an events array')
+  }
+  return payload
+}
+
 function assertObject(payload, label) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error(`Expected ${label} response to be an object`)
@@ -55,6 +62,16 @@ function assertArray(payload, label) {
 
 export function createPolymarketClient({ fetchImpl = fetch } = {}) {
   return {
+    async searchGamma(query, limitPerType = 10) {
+      const payload = await requestJson(
+        fetchImpl,
+        `${GAMMA_BASE_URL}/public-search${buildQuery({ q: query, limit_per_type: limitPerType })}`,
+        'Gamma',
+      )
+
+      return assertGammaSearchResponse(payload)
+    },
+
     async getGammaMarkets({
       limit,
       closed,

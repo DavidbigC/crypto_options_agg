@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import {
   createPolymarketClient,
   assertGammaMarketsResponse,
+  assertGammaSearchResponse,
 } from './lib/polymarket/client.js'
 
 test('createPolymarketClient builds a Gamma markets request with query params', async () => {
@@ -72,10 +73,35 @@ test('createPolymarketClient builds a Data API open interest request', async () 
   assert.equal(seen[0], 'https://data-api.polymarket.com/oi?market=market-123')
 })
 
+test('createPolymarketClient builds a Gamma public search request', async () => {
+  const seen = []
+  const client = createPolymarketClient({
+    fetchImpl: async (url) => {
+      seen.push(url)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ events: [], pagination: { hasMore: false, totalResults: 0 } }),
+      }
+    },
+  })
+
+  await client.searchGamma('bitcoin', 5)
+
+  assert.equal(seen[0], 'https://gamma-api.polymarket.com/public-search?q=bitcoin&limit_per_type=5')
+})
+
 test('assertGammaMarketsResponse rejects non-array payloads', () => {
   assert.throws(
     () => assertGammaMarketsResponse({ data: [] }),
     /expected gamma markets response to be an array/i,
+  )
+})
+
+test('assertGammaSearchResponse rejects payloads without an events array', () => {
+  assert.throws(
+    () => assertGammaSearchResponse([]),
+    /expected gamma search response to have an events array/i,
   )
 })
 

@@ -36,10 +36,33 @@ function marketTypeLabel(market: PolysisSourceMarket) {
 export default function PolysisPage() {
   const [asset, setAsset] = useState<typeof ASSETS[number]>('BTC')
   const [horizon, setHorizon] = useState<typeof HORIZONS[number]>('weekly')
-  const [spotPrice, setSpotPrice] = useState('0')
+  const [spotPrice, setSpotPrice] = useState('')
+  const [referenceSpot, setReferenceSpot] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [payload, setPayload] = useState<PolysisResponse | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadReferenceSpot() {
+      try {
+        const response = await fetch(`http://localhost:3500/api/combined/options/${asset}`)
+        const raw = await response.json().catch(() => ({}))
+        if (!cancelled) {
+          const nextSpot = Number(raw?.spotPrice ?? 0)
+          setReferenceSpot(Number.isFinite(nextSpot) && nextSpot > 0 ? nextSpot : null)
+        }
+      } catch {
+        if (!cancelled) setReferenceSpot(null)
+      }
+    }
+
+    loadReferenceSpot()
+    return () => {
+      cancelled = true
+    }
+  }, [asset])
 
   useEffect(() => {
     let cancelled = false
@@ -49,7 +72,8 @@ export default function PolysisPage() {
       setError(null)
 
       try {
-        const query = Number(spotPrice) > 0 ? `?spotPrice=${encodeURIComponent(spotPrice)}` : ''
+        const activeSpot = Number(spotPrice) > 0 ? Number(spotPrice) : referenceSpot
+        const query = activeSpot && activeSpot > 0 ? `?spotPrice=${encodeURIComponent(activeSpot)}` : ''
         const response = await fetch(`http://localhost:3500/api/polymarket/${asset}/${horizon}${query}`)
         const raw = await response.json().catch(() => ({}))
         if (!response.ok) {
@@ -72,7 +96,7 @@ export default function PolysisPage() {
     return () => {
       cancelled = true
     }
-  }, [asset, horizon, spotPrice])
+  }, [asset, horizon, spotPrice, referenceSpot])
 
   const distributionRows = useMemo<DistributionRow[]>(
     () => buildPolysisDistributionChartData(payload?.distribution ?? { bins: [] }),
@@ -155,6 +179,9 @@ export default function PolysisPage() {
                 placeholder="optional"
                 className="mt-1 block w-32 rounded border border-rim bg-card px-2 py-1 text-sm text-ink outline-none focus:border-tone"
               />
+              <div className="mt-1 text-[11px] text-ink-3">
+                {referenceSpot ? `Using ${formatUsd(referenceSpot)} by default` : 'Awaiting spot feed'}
+              </div>
             </label>
           </div>
         </section>
@@ -283,7 +310,7 @@ export default function PolysisPage() {
                         </div>
                       </div>
                       <a
-                        href={market.id ? `https://polymarket.com/event/${market.id}` : 'https://polymarket.com'}
+                        href={market.slug ? `https://polymarket.com/event/${market.slug}` : 'https://polymarket.com'}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-xs text-tone hover:underline"
