@@ -6,6 +6,7 @@ import {
   buildPolysisDistributionChartData,
   formatPolysisConfidence,
   mapPolymarketResponse,
+  mapPolymarketSurface,
 } from './lib/polysis.js'
 
 test('mapPolymarketResponse preserves the expected core shape', () => {
@@ -103,4 +104,29 @@ test('buildPolysisExpirySeries prefers path move and sorts by expiry date', () =
   assert.equal(rows[1].upPct, 20)
   assert.equal(rows[1].downPct, 15)
   assert.equal(rows[1].signalType, 'path')
+})
+
+test('mapPolymarketSurface maps each horizon through the response mapper', () => {
+  const result = mapPolymarketSurface({
+    asset: 'BTC',
+    generatedAt: '2026-03-12T10:00:00Z',
+    horizons: {
+      weekly: {
+        asset: 'BTC',
+        horizon: 'weekly',
+        expiryDate: '2026-03-16T04:00:00Z',
+        distribution: { source: 'none', bins: [] },
+        summary: { expectedMovePct: 4.2 },
+        pathSummary: { pathMovePct: 4.65 },
+        confidence: { score: 80, label: 'high' },
+        repricing: { change24h: null, change7d: null },
+        sourceMarkets: [],
+      },
+    },
+  })
+
+  assert.equal(result.asset, 'BTC')
+  assert.equal(result.generatedAt, '2026-03-12T10:00:00Z')
+  assert.equal(result.horizons.weekly.pathSummary.pathMovePct, 4.65)
+  assert.equal(result.horizons.daily, null)
 })

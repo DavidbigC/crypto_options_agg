@@ -265,6 +265,42 @@ test('createPolymarketService falls back to outcomePrices when CLOB pricing fail
   assert.equal(result.sourceMarkets[0].classification.type, 'threshold')
 })
 
+test('createPolymarketService getSurface returns all supported horizons', async () => {
+  const service = createPolymarketService({
+    now: () => Date.parse('2026-03-12T10:00:00Z'),
+    client: {
+      searchGamma: async (query) => ({
+        events: [{
+          slug: query.includes('weekly') ? 'btc-weekly' : 'btc-daily',
+          title: 'Bitcoin',
+          endDate: '2026-03-12T16:00:00Z',
+          tags: [{ slug: 'bitcoin' }, { slug: query.includes('weekly') ? 'weekly' : query.includes('monthly') ? 'monthly' : query.includes('yearly') ? 'yearly' : 'daily' }],
+          markets: [{
+            id: query,
+            question: query.includes('daily')
+              ? 'Will Bitcoin reach $72,000 on March 12?'
+              : 'Will the price of Bitcoin be above $70,000 on March 12?',
+            volumeNum: 5000,
+            spread: 0.01,
+            lastTradePrice: 0.5,
+            clobTokenIds: '["401","402"]',
+          }],
+        }],
+      }),
+      getClobPrices: async () => ({}),
+      getOpenInterest: async () => ([{ value: 5000 }]),
+    },
+  })
+
+  const surface = await service.getSurface({ asset: 'BTC', spotPrice: 70000 })
+
+  assert.equal(surface.asset, 'BTC')
+  assert.ok(surface.horizons.daily)
+  assert.ok(surface.horizons.weekly)
+  assert.ok(surface.horizons.monthly)
+  assert.ok(surface.horizons.yearly)
+})
+
 test('createPolymarketService requests open interest with conditionId and reads value payloads', async () => {
   const seen = []
   const service = createPolymarketService({

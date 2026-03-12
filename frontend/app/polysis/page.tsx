@@ -16,9 +16,9 @@ import {
   buildPolysisDistributionChartData,
   buildPolysisExpirySeries,
   formatPolysisConfidence,
-  mapPolymarketResponse,
+  mapPolymarketSurface,
 } from '@/lib/polysis.js'
-import type { PolysisResponse, PolysisSourceMarket } from '@/types/polysis'
+import type { PolysisResponse, PolysisSourceMarket, PolysisSurfaceResponse } from '@/types/polysis'
 
 const ASSETS = ['BTC', 'ETH', 'SOL'] as const
 const HORIZONS = ['daily', 'weekly', 'monthly', 'yearly'] as const
@@ -91,6 +91,7 @@ export default function PolysisPage() {
   const [referenceSpot, setReferenceSpot] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [generatedAt, setGeneratedAt] = useState<string | null>(null)
   const [payloads, setPayloads] = useState<Partial<Record<HorizonKey, PolysisResponse | null>>>({})
 
   useEffect(() => {
@@ -116,43 +117,41 @@ export default function PolysisPage() {
   }, [asset])
 
   useEffect(() => {
-    let cancelled = false
+    setLoading(true)
+    setError(null)
 
-    async function loadPolysis() {
-      setLoading(true)
-      setError(null)
+    const activeSpot = Number(spotPrice) > 0 ? Number(spotPrice) : referenceSpot
+    const query = activeSpot && activeSpot > 0 ? `?spotPrice=${encodeURIComponent(activeSpot)}` : ''
+    const eventSource = new EventSource(`http://localhost:3500/api/stream/polymarket/${asset}${query}`)
 
+    eventSource.onmessage = (event) => {
       try {
-        const activeSpot = Number(spotPrice) > 0 ? Number(spotPrice) : referenceSpot
-        const query = activeSpot && activeSpot > 0 ? `?spotPrice=${encodeURIComponent(activeSpot)}` : ''
-        const responses = await Promise.all(HORIZONS.map(async (horizon) => {
-          const response = await fetch(`http://localhost:3500/api/polymarket/${asset}/${horizon}${query}`)
-          const raw = await response.json().catch(() => ({}))
-          if (!response.ok) {
-            throw new Error(`${horizon}: ${raw?.error || `Server error ${response.status}`}`)
-          }
-          return [horizon, mapPolymarketResponse(raw) as PolysisResponse] as const
-        }))
-
-        if (!cancelled) {
-          const nextPayloads = Object.fromEntries(responses) as Partial<Record<HorizonKey, PolysisResponse>>
-          setPayloads(nextPayloads)
-          const firstAvailable = HORIZONS.find((key) => nextPayloads[key])
-          setFocusHorizon((current) => (nextPayloads[current] ? current : (firstAvailable ?? 'weekly')))
+        const raw = JSON.parse(event.data)
+        if (raw?.error) {
+          setError(String(raw.error))
+          setLoading(false)
+          return
         }
-      } catch (nextError) {
-        if (!cancelled) {
-          setPayloads({})
-          setError(nextError instanceof Error ? nextError.message : 'Unable to load Polymarket data')
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
+        const surface = mapPolymarketSurface(raw) as PolysisSurfaceResponse
+        setGeneratedAt(surface.generatedAt ?? null)
+        setPayloads(surface.horizons ?? {})
+        const firstAvailable = HORIZONS.find((key) => surface.horizons?.[key])
+        setFocusHorizon((current) => (surface.horizons?.[current] ? current : (firstAvailable ?? 'weekly')))
+        setError(null)
+        setLoading(false)
+      } catch {
+        setError('Unable to decode Polymarket stream')
+        setLoading(false)
       }
     }
 
-    loadPolysis()
+    eventSource.onerror = () => {
+      setError('Polymarket stream disconnected')
+      setLoading(false)
+    }
+
     return () => {
-      cancelled = true
+      eventSource.close()
     }
   }, [asset, spotPrice, referenceSpot])
 
@@ -209,6 +208,7 @@ export default function PolysisPage() {
               <div className="rounded-lg border border-rim bg-muted/60 px-3 py-2 text-xs">
                 <div className="text-ink-3 uppercase tracking-[0.14em]">Points</div>
                 <div className="mt-1 font-medium text-ink">{chartRows.length}</div>
+                <div className="mt-1 text-[11px] text-ink-3">{generatedAt ? `Live ${formatExpiry(generatedAt)}` : 'Live stream'}</div>
               </div>
             </div>
           </div>

@@ -69,3 +69,9 @@ export type PolysisResponse = {
   sourceMarkets: PolysisSourceMarket[]
   pathMarkets?: PolysisSourceMarket[]
 }
+
+export type PolysisSurfaceResponse = {
+  asset: 'BTC' | 'ETH' | 'SOL'
+  generatedAt?: string
+  horizons: Partial<Record<'daily' | 'weekly' | 'monthly' | 'yearly', PolysisResponse | null>>
+}

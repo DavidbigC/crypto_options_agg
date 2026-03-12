@@ -19,6 +19,20 @@ export function mapPolymarketResponse(payload) {
   }
 }
 
+export function mapPolymarketSurface(payload) {
+  const horizons = payload?.horizons && typeof payload.horizons === 'object' ? payload.horizons : {}
+  return {
+    asset: payload?.asset ?? null,
+    generatedAt: payload?.generatedAt ?? null,
+    horizons: {
+      daily: horizons.daily ? mapPolymarketResponse(horizons.daily) : null,
+      weekly: horizons.weekly ? mapPolymarketResponse(horizons.weekly) : null,
+      monthly: horizons.monthly ? mapPolymarketResponse(horizons.monthly) : null,
+      yearly: horizons.yearly ? mapPolymarketResponse(horizons.yearly) : null,
+    },
+  }
+}
+
 function formatExpiryLabel(value) {
   if (!value) return 'Unknown'
   const date = new Date(value)

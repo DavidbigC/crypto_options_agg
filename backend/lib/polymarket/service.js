@@ -190,98 +190,152 @@ export function createPolymarketService({
   minVolume = 100,
   minOpenInterest = 100,
   maxSpreadPct = 1,
+  discoveryTtlMs = 5 * 60_000,
+  metadataTtlMs = 5 * 60_000,
+  livePriceLookup = () => null,
   now = () => Date.now(),
 } = {}) {
-  return {
-    async getAnalysis({ asset, horizon, spotPrice }) {
-      const searchPayload = await client.searchGamma(buildSearchQuery(asset, horizon, now()), 25)
-      const discoveredMarkets = flattenDiscoveredMarkets(searchPayload)
-      const relevantMarkets = discoveredMarkets.filter((market) =>
-        market.inferredAsset === asset
-        && market.inferredHorizon === horizon
-      )
-      const selectedMarkets = selectNearestEventMarkets(relevantMarkets)
+  const selectedMarketsCache = new Map()
+  const marketMetadataCache = new Map()
 
-      const tokenIds = selectedMarkets
-        .map(resolveTokenId)
-        .filter(Boolean)
+  async function getSelectedMarkets(asset, horizon) {
+    const cacheKey = `${asset}:${horizon}`
+    const cached = selectedMarketsCache.get(cacheKey)
+    const currentNow = now()
+    if (cached && cached.expiresAt > currentNow) {
+      return cached.markets
+    }
 
-      const missingPriceTokenIds = selectedMarkets
-        .filter((market) =>
-          !Number.isFinite(Number(market.lastTradePrice))
-          && !Number.isFinite(parseOutcomeProbability(market))
-        )
-        .map(resolveTokenId)
-        .filter(Boolean)
+    const searchPayload = await client.searchGamma(buildSearchQuery(asset, horizon, currentNow), 25)
+    const discoveredMarkets = flattenDiscoveredMarkets(searchPayload)
+    const relevantMarkets = discoveredMarkets.filter((market) =>
+      market.inferredAsset === asset
+      && market.inferredHorizon === horizon
+    )
+    const selectedMarkets = selectNearestEventMarkets(relevantMarkets)
+    selectedMarketsCache.set(cacheKey, {
+      expiresAt: currentNow + discoveryTtlMs,
+      markets: selectedMarkets,
+    })
+    return selectedMarkets
+  }
 
-      let prices = {}
-      if (missingPriceTokenIds.length) {
-        try {
-          prices = await client.getClobPrices(missingPriceTokenIds)
-        } catch {
-          prices = {}
-        }
-      }
+  async function getOpenInterestValue(market) {
+    const cacheKey = String(market.conditionId ?? market.id)
+    const cached = marketMetadataCache.get(cacheKey)
+    const currentNow = now()
+    if (cached && cached.expiresAt > currentNow) {
+      return cached.openInterest
+    }
 
-      const expiryDate = selectedMarkets
-        .map((market) => market.event?.endDate ?? market.endDate ?? null)
-        .find(Boolean) ?? null
+    const openInterestRows = await client.getOpenInterest(cacheKey)
+    const openInterest = parseOpenInterest(openInterestRows)
+    marketMetadataCache.set(cacheKey, {
+      expiresAt: currentNow + metadataTtlMs,
+      openInterest,
+    })
+    return openInterest
+  }
 
-      const sourceMarkets = await Promise.all(selectedMarkets.map(async (market) => {
+  async function buildSourceMarkets(selectedMarkets) {
+    const missingPriceTokenIds = selectedMarkets
+      .filter((market) => {
         const tokenId = resolveTokenId(market)
-        const openInterestRows = await client.getOpenInterest(market.conditionId ?? market.id)
-        const classification = classifyPolymarketMarket(market)
-        const fallbackProbability = parseOutcomeProbability(market)
-        const gammaPrice = Number(market.lastTradePrice)
-        const clobPrice = tokenId ? Number(prices[tokenId]) : Number.NaN
-        return {
-          id: market.id,
-          slug: market.slug ?? null,
-          question: market.question ?? market.title ?? '',
-          tokenId,
-          endDate: market.event?.endDate ?? market.endDate ?? null,
-          lastTradePrice: Number.isFinite(gammaPrice)
+        return !Number.isFinite(Number(market.lastTradePrice))
+          && !Number.isFinite(parseOutcomeProbability(market))
+          && !Number.isFinite(livePriceLookup(tokenId))
+      })
+      .map(resolveTokenId)
+      .filter(Boolean)
+
+    let prices = {}
+    if (missingPriceTokenIds.length) {
+      try {
+        prices = await client.getClobPrices(missingPriceTokenIds)
+      } catch {
+        prices = {}
+      }
+    }
+
+    return Promise.all(selectedMarkets.map(async (market) => {
+      const tokenId = resolveTokenId(market)
+      const classification = classifyPolymarketMarket(market)
+      const fallbackProbability = parseOutcomeProbability(market)
+      const livePrice = tokenId ? livePriceLookup(tokenId) : null
+      const wsPrice = Number.isFinite(livePrice) ? Number(livePrice) : Number.NaN
+      const gammaPrice = Number(market.lastTradePrice)
+      const clobPrice = tokenId ? Number(prices[tokenId]) : Number.NaN
+      return {
+        id: market.id,
+        slug: market.slug ?? null,
+        question: market.question ?? market.title ?? '',
+        tokenId,
+        endDate: market.event?.endDate ?? market.endDate ?? null,
+        lastTradePrice: Number.isFinite(wsPrice)
+          ? wsPrice
+          : Number.isFinite(gammaPrice)
             ? gammaPrice
             : Number.isFinite(fallbackProbability)
               ? Number(fallbackProbability)
               : Number.isFinite(clobPrice)
                 ? clobPrice
                 : 0,
-          volumeNum: Number(market.volumeNum ?? market.volume ?? 0) || 0,
-          openInterest: parseOpenInterest(openInterestRows),
-          spreadPct: Number(market.spreadPct ?? market.spread ?? 0) || 0,
-          classification,
-        }
-      }))
+        volumeNum: Number(market.volumeNum ?? market.volume ?? 0) || 0,
+        openInterest: await getOpenInterestValue(market),
+        spreadPct: Number(market.spreadPct ?? market.spread ?? 0) || 0,
+        classification,
+      }
+    }))
+  }
 
-      const eligibleMarkets = sourceMarkets.filter((market) =>
-        market.volumeNum >= minVolume
-        && market.openInterest >= minOpenInterest
-        && market.spreadPct <= maxSpreadPct
-        && market.classification.type !== 'unknown',
+  async function getAnalysis({ asset, horizon, spotPrice }) {
+    const selectedMarkets = await getSelectedMarkets(asset, horizon)
+    const sourceMarkets = await buildSourceMarkets(selectedMarkets)
+    const expiryDate = selectedMarkets
+      .map((market) => market.event?.endDate ?? market.endDate ?? null)
+      .find(Boolean) ?? null
+
+    const eligibleMarkets = sourceMarkets.filter((market) =>
+      market.volumeNum >= minVolume
+      && market.openInterest >= minOpenInterest
+      && market.spreadPct <= maxSpreadPct
+      && market.classification.type !== 'unknown',
+    )
+    const pathMarkets = eligibleMarkets.filter((market) => market.classification.type === 'path')
+
+    const distribution = buildDistributionFromMarkets(eligibleMarkets)
+    const summary = summarizeDistribution(distribution, spotPrice)
+    const pathSummary = summarizePathMarkets(pathMarkets, spotPrice)
+    const confidence = buildConfidence(eligibleMarkets)
+
+    return {
+      asset,
+      horizon,
+      expiryDate,
+      distribution,
+      summary,
+      confidence,
+      pathSummary,
+      repricing: {
+        change24h: null,
+        change7d: null,
+      },
+      sourceMarkets,
+      eligibleMarkets,
+      pathMarkets,
+    }
+  }
+
+  return {
+    getAnalysis,
+    async getSurface({ asset, spotPrice }) {
+      const horizons = await Promise.all(
+        Array.from(SUPPORTED_HORIZONS).map(async (horizon) => [horizon, await getAnalysis({ asset, horizon, spotPrice })]),
       )
-      const pathMarkets = eligibleMarkets.filter((market) => market.classification.type === 'path')
-
-      const distribution = buildDistributionFromMarkets(eligibleMarkets)
-      const summary = summarizeDistribution(distribution, spotPrice)
-      const pathSummary = summarizePathMarkets(pathMarkets, spotPrice)
-      const confidence = buildConfidence(eligibleMarkets)
-
       return {
         asset,
-        horizon,
-        expiryDate,
-        distribution,
-        summary,
-        confidence,
-        pathSummary,
-        repricing: {
-          change24h: null,
-          change7d: null,
-        },
-        sourceMarkets,
-        eligibleMarkets,
-        pathMarkets,
+        generatedAt: new Date(now()).toISOString(),
+        horizons: Object.fromEntries(horizons),
       }
     },
   }
@@ -307,6 +361,26 @@ export function createPolymarketRouteHandler({ service = createPolymarketService
     } catch (error) {
       return res.status(503).json({
         error: error instanceof Error ? error.message : 'Polymarket data unavailable',
+      })
+    }
+  }
+}
+
+export function createPolymarketSurfaceRouteHandler({ service = createPolymarketService() } = {}) {
+  return async function polymarketSurfaceRouteHandler(req, res) {
+    const asset = String(req.params?.asset ?? '').toUpperCase()
+    const spotPrice = Number(req.query?.spotPrice ?? 0) || 0
+
+    if (!SUPPORTED_ASSETS.has(asset)) {
+      return res.status(400).json({ error: `Unsupported asset: ${asset || 'unknown'}` })
+    }
+
+    try {
+      const payload = await service.getSurface({ asset, spotPrice })
+      return res.json(payload)
+    } catch (error) {
+      return res.status(503).json({
+        error: error instanceof Error ? error.message : 'Polymarket surface unavailable',
       })
     }
   }

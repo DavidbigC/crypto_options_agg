@@ -26,7 +26,17 @@ import { futuresCache, startFuturesPolling } from './lib/futures.js';
 import { analysisCache, updateAnalysisCache } from './lib/analysis.js'
 import { arbCache, updateArbCache } from './lib/arbs.js'
 import { scannerCache, updateScannerCache, computeGammaRows, computeVegaRows } from './lib/scanners.js'
-import { createPolymarketRouteHandler } from './lib/polymarket/service.js'
+import {
+  createPolymarketRouteHandler,
+  createPolymarketService,
+  createPolymarketSurfaceRouteHandler,
+} from './lib/polymarket/service.js'
+import {
+  lookupPolymarketPrice,
+  setPolymarketUpdateCallback,
+  startPolymarketWS,
+  subscribePolymarketAssetIds,
+} from './lib/polymarket/ws.js'
 
 import { runOptimizer } from './lib/optimizer.js'
 import { createOkxPortfolioService } from './lib/okx-portfolio.js'
@@ -43,7 +53,9 @@ const app = express();
 const PORT = process.env.PORT || 3500;
 const okxPortfolioService = createOkxPortfolioService({ env: process.env })
 const bybitPortfolioService = createBybitPortfolioService({ env: process.env })
-const polymarketRouteHandler = createPolymarketRouteHandler()
+const polymarketService = createPolymarketService({ livePriceLookup: lookupPolymarketPrice })
+const polymarketRouteHandler = createPolymarketRouteHandler({ service: polymarketService })
+const polymarketSurfaceRouteHandler = createPolymarketSurfaceRouteHandler({ service: polymarketService })
 
 // Middleware
 app.use(cors());
@@ -293,6 +305,7 @@ function buildCombinedResponse(baseCoin) {
 // ─── SSE Infrastructure ───────────────────────────────────────────────────────
 
 const sseClients = new Map() // key: 'exchange:coin' → Map<ServerResponse, {expiry}>
+const polymarketTokenAssetMap = new Map()
 
 // Filter full response down to a single expiry's data (keeps metadata intact).
 // Reduces payload from ~220KB to ~30KB when a client is watching one expiry.
@@ -312,6 +325,43 @@ function emitSSE(exchange, coin, data) {
       res.write(out)
     } catch (err) {
       console.error(`SSE write error (${key}), removing client:`, err.message)
+      clients.delete(res)
+    }
+  }
+}
+
+function registerPolymarketAssetTokens(asset, surface) {
+  const horizons = Object.values(surface?.horizons ?? {})
+  for (const horizon of horizons) {
+    for (const market of horizon?.sourceMarkets ?? []) {
+      if (!market?.tokenId) continue
+      const tokenId = String(market.tokenId)
+      if (!polymarketTokenAssetMap.has(tokenId)) polymarketTokenAssetMap.set(tokenId, new Set())
+      polymarketTokenAssetMap.get(tokenId).add(asset)
+    }
+  }
+}
+
+async function emitPolymarketSurface(asset) {
+  const key = `polymarket:${asset}`
+  const clients = sseClients.get(key)
+  if (!clients?.size) return
+
+  for (const [res, opts] of clients.entries()) {
+    try {
+      const surface = await polymarketService.getSurface({
+        asset,
+        spotPrice: Number(opts?.spotPrice ?? 0) || 0,
+      })
+      registerPolymarketAssetTokens(asset, surface)
+      subscribePolymarketAssetIds(
+        Object.values(surface?.horizons ?? {}).flatMap((horizon) =>
+          (horizon?.sourceMarkets ?? []).map((market) => market.tokenId).filter(Boolean),
+        ),
+      )
+      res.write(`data: ${JSON.stringify(surface)}\n\n`)
+    } catch (err) {
+      console.error(`Polymarket SSE write error (${asset}), removing client:`, err.message)
       clients.delete(res)
     }
   }
@@ -1013,6 +1063,42 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
   })
 })
 
+app.get('/api/stream/polymarket/:asset', async (req, res) => {
+  const asset = req.params.asset.toUpperCase()
+  const spotPrice = Number(req.query.spotPrice ?? 0) || 0
+
+  res.setHeader('Content-Type',  'text/event-stream')
+  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Connection',    'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')
+  res.flushHeaders()
+  res.socket?.setNoDelay(true)
+  res.write('retry: 1000\n\n')
+
+  try {
+    const surface = await polymarketService.getSurface({ asset, spotPrice })
+    registerPolymarketAssetTokens(asset, surface)
+    subscribePolymarketAssetIds(
+      Object.values(surface?.horizons ?? {}).flatMap((horizon) =>
+        (horizon?.sourceMarkets ?? []).map((market) => market.tokenId).filter(Boolean),
+      ),
+    )
+    res.write(`data: ${JSON.stringify(surface)}\n\n`)
+  } catch (error) {
+    res.write(`data: ${JSON.stringify({ error: error?.message || 'Polymarket surface unavailable' })}\n\n`)
+  }
+
+  const key = `polymarket:${asset}`
+  if (!sseClients.has(key)) sseClients.set(key, new Map())
+  sseClients.get(key).set(res, { spotPrice })
+
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 5_000)
+  req.on('close', () => {
+    clearInterval(heartbeat)
+    sseClients.get(key)?.delete(res)
+  })
+})
+
 // ─── Deribit Route ────────────────────────────────────────────────────────────
 
 app.get('/api/deribit/options/:coin', (req, res) => {
@@ -1046,6 +1132,7 @@ app.get('/api/analysis/:exchange/:coin', (req, res) => {
   res.json(cached)
 })
 
+app.get('/api/polymarket/surface/:asset', polymarketSurfaceRouteHandler)
 app.get('/api/polymarket/:asset/:horizon', polymarketRouteHandler)
 
 // ─── Arbs Route ───────────────────────────────────────────────────────────────
@@ -1133,6 +1220,7 @@ startDeribitPolling()
 startDeribitWS()
 startFuturesPolling()
 startBinanceWS()
+startPolymarketWS()
 // Derive WS is demand-driven — started by addDeriveViewer() when first SSE client connects
 
 // ─── SSE Push Callbacks ───────────────────────────────────────────────────────
@@ -1173,6 +1261,14 @@ setBinanceUpdateCallback((coin) => {
     updateScannerCache(`binance:${coin}`,   data,     binanceSpotCache[coin] ?? 0)
     updateScannerCache(`combined:${coin}`,  combined, binanceSpotCache[coin] ?? 0)
     updateArbCache(coin, combined, binanceSpotCache[coin] ?? 0, futuresCache[coin] ?? [])
+  }
+})
+
+setPolymarketUpdateCallback((tokenId) => {
+  const assets = polymarketTokenAssetMap.get(String(tokenId))
+  if (!assets?.size) return
+  for (const asset of assets) {
+    emitPolymarketSurface(asset)
   }
 })
 
