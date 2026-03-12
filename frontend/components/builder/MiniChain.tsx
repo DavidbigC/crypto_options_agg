@@ -17,15 +17,17 @@ interface MiniChainProps {
 }
 
 const COINS = ['BTC', 'ETH', 'SOL'] as const
-type ExchangeKey = 'bybit' | 'okx' | 'deribit'
-const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit']
+type ExchangeKey = 'bybit' | 'okx' | 'deribit' | 'binance'
+const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit', 'binance']
 const EX_COLOR: Record<ExchangeKey, string> = EX_BADGE as Record<ExchangeKey, string>
 const EX_LABEL: Record<ExchangeKey, string> = EX_LABEL_MAP as Record<ExchangeKey, string>
 
-function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | null | undefined }) {
+const EX_SHORT: Record<string, string> = { bybit: 'B', okx: 'O', deribit: 'D', binance: 'N' }
+
+function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | 'binance' | null | undefined }) {
   return (
     <span className={classNames('inline-block mx-0.5 w-[14px] text-center rounded text-[8px] font-bold', ex ? EX_BADGE[ex] : 'invisible')}>
-      {ex === 'bybit' ? 'B' : ex === 'okx' ? 'O' : ex === 'deribit' ? 'D' : 'B'}
+      {ex ? (EX_SHORT[ex] ?? ex[0].toUpperCase()) : ''}
     </span>
   )
 }

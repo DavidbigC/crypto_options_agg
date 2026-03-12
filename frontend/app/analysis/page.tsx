@@ -5,6 +5,7 @@ import classNames from 'classnames'
 import Header from '@/components/Header'
 import { OptionsData } from '@/types/options'
 import { filterExpirations } from '@/lib/filterExpirations'
+import { apiPath, ssePath } from '@/lib/apiBase.js'
 import { EX_ACTIVE, EX_SOFT, EX_NAME } from '@/lib/exchangeColors'
 import { groupSurfaceBuckets } from '@/lib/surfaceGrouping.js'
 import {
@@ -204,7 +205,7 @@ export default function AnalysisPage() {
     setSelectedExpiration('')
     selectedExpirationRef.current = ''
 
-    const evtSource = new EventSource(`http://localhost:3500/api/stream/combined/${selectedCrypto}`)
+    const evtSource = new EventSource(ssePath(`stream/combined/${selectedCrypto}`))
 
     evtSource.onmessage = (e) => {
       if (version !== fetchVersion.current) {
@@ -269,7 +270,7 @@ export default function AnalysisPage() {
     async function fetchAllAnalysis() {
       const results = await Promise.all(RESEARCH_EXCHANGES.map(async (exchange) => {
         try {
-          const response = await fetch(`http://localhost:3500/api/analysis/${exchange}/${coinForExchange(exchange, selectedCrypto)}`)
+          const response = await fetch(apiPath(`analysis/${exchange}/${coinForExchange(exchange, selectedCrypto)}`))
           const payload = await response.json().catch(() => ({}))
           if (!response.ok) {
             throw new Error(payload?.error || `HTTP ${response.status}`)

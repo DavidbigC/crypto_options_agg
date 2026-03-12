@@ -1,21 +1,30 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import classNames from 'classnames'
 import { CombinedOptionContract, CombinedOptionsChainData } from '@/types/options'
 import { BoxSpread } from '@/lib/strategies'
 
 import GreekTh from '@/components/GreekTh'
 import { EX_BADGE, EX_LABEL as EX_LABEL_MAP } from '@/lib/exchangeColors'
+import { collectSortedStrikes, findAtmStrike, getOptionMoneyness } from '@/lib/optionsChainLayout.js'
+
+const COL_WIDTHS = [
+  '4.5rem', '4.75rem', '5rem', '4.5rem', '4.25rem', '4.25rem', '4.25rem', '5rem', '7.5rem', '7.5rem',
+  '6rem',
+  '7.5rem', '7.5rem', '5rem', '4.25rem', '4.25rem', '4.25rem', '4.5rem', '5rem', '4.75rem', '4.5rem',
+]
 
 const TAKER_FEE = 0.0003
 const FEE_CAP: Record<string, number> = {
   bybit:   0.07,
   okx:     0.07,
   deribit: 0.125,
+  derive:  0.07,
+  binance: 0.1,
 }
 
-type ExchangeKey = 'bybit' | 'okx' | 'deribit'
+type ExchangeKey = 'bybit' | 'okx' | 'deribit' | 'derive' | 'binance'
 
 interface CombinedOptionsChainProps {
   data: CombinedOptionsChainData
@@ -37,9 +46,10 @@ interface CombinedRowProps {
   activeExchanges: Set<ExchangeKey>
   boxForStrike?: BoxSpread[]
   daysToExpiry: number
+  atmStrike: number | null
 }
 
-function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | null | undefined }) {
+function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | 'derive' | 'binance' | null | undefined }) {
   return (
     <span className={classNames('inline-block ml-1 w-[26px] text-center rounded text-[9px] font-bold', ex ? EX_BADGE[ex] : 'invisible')}>
       {ex ? EX_LABEL_MAP[ex] : ''}
@@ -47,7 +57,28 @@ function ExBadge({ ex }: { ex: 'bybit' | 'okx' | 'deribit' | null | undefined })
   )
 }
 
-function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchanges, boxForStrike, daysToExpiry }: CombinedRowProps) {
+function MoneynessLegend() {
+  return (
+    <div className="flex items-center gap-4 text-[11px] text-ink-3">
+      <span className="text-ink-2">Left = Call</span>
+      <span className="text-ink-2">Right = Put</span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-sm border border-emerald-500/80 dark:border-emerald-400/80" />
+        ITM
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-sm border border-stone-400/80 dark:border-stone-500/80 bg-stone-100/70 dark:bg-stone-900/40" />
+        ATM
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="h-2.5 w-2.5 rounded-sm border border-rose-500/80 dark:border-rose-400/80" />
+        OTM
+      </span>
+    </div>
+  )
+}
+
+function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchanges, boxForStrike, daysToExpiry, atmStrike }: CombinedRowProps) {
   const withFee = (price: number, side: 'buy' | 'sell', ex: string) => {
     if (!feesOn || price === 0) return price
     const cap = FEE_CAP[ex] ?? 0.07
@@ -85,43 +116,48 @@ function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchan
     return ((net / collateral) * (365 / daysToExpiry) * 100).toFixed(1) + '%'
   }
 
-  const isITM = (type: 'call' | 'put') =>
-    type === 'call' ? strike < spotPrice : strike > spotPrice
+  const callMoneyness = getOptionMoneyness({ optionType: 'call', strike, spotPrice, atmStrike })
+  const putMoneyness = getOptionMoneyness({ optionType: 'put', strike, spotPrice, atmStrike })
+
+  const strikeEdgeClass = (moneyness: 'itm' | 'atm' | 'otm') => classNames(
+    'absolute top-1 bottom-1 w-[2px] rounded-full',
+    {
+      'bg-emerald-500/85 dark:bg-emerald-400/85': moneyness === 'itm',
+      'bg-stone-400/85 dark:bg-stone-500/85': moneyness === 'atm',
+      'bg-rose-500/85 dark:bg-rose-400/85': moneyness === 'otm',
+    },
+  )
 
   return (
     <tr className={classNames('border-b hover:bg-muted text-xs', {
-      'bg-amber-50 dark:bg-amber-950/30': isATM,
       'border-rim': true,
     })}>
       {/* CALLS */}
-      <td className="px-2 py-1 text-right text-ink-2 whitespace-nowrap">
-        {(() => { const r = fmt(call, 'sell'); return <><span>{r.price}</span><ExBadge ex={r.ex} /></> })()}
-      </td>
-      <td className={classNames('px-1.5 py-1 text-right text-amber-600 dark:text-amber-400 text-[11px] font-mono', {
-        'opacity-30': isITM('call'),
-      })}>
+      <td className="px-2 py-1 text-right text-ink-3 whitespace-nowrap">{call ? fmtG(call.vega) : '--'}</td>
+      <td className="px-2 py-1 text-right text-ink-3 whitespace-nowrap">{call ? fmtG(call.theta) : '--'}</td>
+      <td className="px-2 py-1 text-right text-ink-3 whitespace-nowrap">{call ? fmtG(call.gamma, 5) : '--'}</td>
+      <td className="px-2 py-1 text-right text-ink-3 whitespace-nowrap">{call ? fmtG(call.delta) : '--'}</td>
+      <td className="px-1 py-1 text-right text-ink-3 text-[11px] whitespace-nowrap">{call?.askVol  ? (call.askVol  * 100).toFixed(1) + '%' : '--'}</td>
+      <td className="px-1 py-1 text-right text-ink-3 text-[11px] whitespace-nowrap">{call?.markVol ? (call.markVol * 100).toFixed(1) + '%' : '--'}</td>
+      <td className="px-1 py-1 text-right text-ink-3 text-[11px] whitespace-nowrap">{call?.bidVol  ? (call.bidVol  * 100).toFixed(1) + '%' : '--'}</td>
+      <td className="px-1.5 py-1 text-right text-amber-600 dark:text-amber-400 text-[11px] font-mono whitespace-nowrap">
         {sellAPR(call, spotPrice)}
       </td>
       <td className="px-2 py-1 text-right text-ink-2 whitespace-nowrap">
         {(() => { const r = fmt(call, 'buy'); return <><span>{r.price}</span><ExBadge ex={r.ex} /></> })()}
       </td>
-      <td className="px-2 py-1 text-right text-ink-3">{call ? fmtG(call.delta) : '--'}</td>
-      <td className="px-2 py-1 text-right text-ink-3">{call ? fmtG(call.gamma, 5) : '--'}</td>
-      <td className="px-2 py-1 text-right text-ink-3">{call ? fmtG(call.theta) : '--'}</td>
-      <td className="px-2 py-1 text-right text-ink-3">{call ? fmtG(call.vega) : '--'}</td>
-      <td className="px-1 py-1 text-right text-ink-3 text-[11px]">{call?.bidVol  ? (call.bidVol  * 100).toFixed(1) + '%' : '--'}</td>
-      <td className="px-1 py-1 text-right text-ink-3 text-[11px]">{call?.markVol ? (call.markVol * 100).toFixed(1) + '%' : '--'}</td>
-      <td className="px-1 py-1 text-right text-ink-3 text-[11px]">{call?.askVol  ? (call.askVol  * 100).toFixed(1) + '%' : '--'}</td>
-      <td className="px-2 py-1 text-right text-xs text-tone font-medium">
-        {call && isITM('call') ? 'ITM' : ''}
+      <td className="px-2 py-1 text-right text-ink-2 whitespace-nowrap">
+        {(() => { const r = fmt(call, 'sell'); return <><span>{r.price}</span><ExBadge ex={r.ex} /></> })()}
       </td>
 
       {/* STRIKE */}
-      <td className={classNames('relative px-3 py-1 text-center font-mono font-semibold', {
-        'text-tone bg-amber-100 dark:bg-amber-900/30': isATM && !boxForStrike?.length,
-        'text-ink': !isATM && !boxForStrike?.length,
-        'bg-amber-200 dark:bg-amber-800/50 text-amber-900 dark:text-amber-200 outline outline-1 outline-amber-500 group/strike cursor-help': !!boxForStrike?.length,
+      <td className={classNames('relative px-3 py-1 text-center font-mono font-semibold whitespace-nowrap', {
+        'text-tone bg-amber-100 dark:bg-amber-900/30': callMoneyness === 'atm' && putMoneyness === 'atm' && !boxForStrike?.length,
+        'text-ink': !(callMoneyness === 'atm' && putMoneyness === 'atm') && !boxForStrike?.length,
+        'bg-amber-200 dark:bg-amber-800/50 text-amber-900 dark:text-amber-200 outline-amber-500 group/strike cursor-help': !!boxForStrike?.length,
       })}>
+        {!boxForStrike?.length ? <span className={classNames(strikeEdgeClass(callMoneyness), 'left-0')} /> : null}
+        {!boxForStrike?.length ? <span className={classNames(strikeEdgeClass(putMoneyness), 'right-0')} /> : null}
         {strike.toLocaleString()}
         {boxForStrike?.length ? (() => {
           const best = boxForStrike.reduce((a, b) => b.profit > a.profit ? b : a)
@@ -139,40 +175,53 @@ function CombinedRow({ call, put, strike, spotPrice, isATM, feesOn, activeExchan
       </td>
 
       {/* PUTS */}
-      <td className="px-2 py-1 text-left text-xs text-tone font-medium">
-        {put && isITM('put') ? 'ITM' : ''}
-      </td>
-      <td className="px-2 py-1 text-left text-ink-3">{put ? fmtG(put.vega) : '--'}</td>
-      <td className="px-2 py-1 text-left text-ink-3">{put ? fmtG(put.theta) : '--'}</td>
-      <td className="px-2 py-1 text-left text-ink-3">{put ? fmtG(put.gamma, 5) : '--'}</td>
-      <td className="px-2 py-1 text-left text-ink-3">{put ? fmtG(put.delta) : '--'}</td>
-      <td className="px-1 py-1 text-left text-ink-3 text-[11px]">{put?.askVol  ? (put.askVol  * 100).toFixed(1) + '%' : '--'}</td>
-      <td className="px-1 py-1 text-left text-ink-3 text-[11px]">{put?.markVol ? (put.markVol * 100).toFixed(1) + '%' : '--'}</td>
-      <td className="px-1 py-1 text-left text-ink-3 text-[11px]">{put?.bidVol  ? (put.bidVol  * 100).toFixed(1) + '%' : '--'}</td>
-      <td className="px-2 py-1 text-left text-ink-2 whitespace-nowrap">
-        {(() => { const r = fmt(put, 'buy'); return <><ExBadge ex={r.ex} /><span>{r.price}</span></> })()}
-      </td>
-      <td className={classNames('px-1.5 py-1 text-left text-amber-600 dark:text-amber-400 text-[11px] font-mono', {
-        'opacity-30': isITM('put'),
-      })}>
-        {sellAPR(put, strike)}
-      </td>
       <td className="px-2 py-1 text-left text-ink-2 whitespace-nowrap">
         {(() => { const r = fmt(put, 'sell'); return <><ExBadge ex={r.ex} /><span>{r.price}</span></> })()}
       </td>
+      <td className="px-2 py-1 text-left text-ink-2 whitespace-nowrap">
+        {(() => { const r = fmt(put, 'buy'); return <><ExBadge ex={r.ex} /><span>{r.price}</span></> })()}
+      </td>
+      <td className="px-1.5 py-1 text-left text-amber-600 dark:text-amber-400 text-[11px] font-mono whitespace-nowrap">
+        {sellAPR(put, strike)}
+      </td>
+      <td className="px-1 py-1 text-left text-ink-3 text-[11px] whitespace-nowrap">{put?.bidVol  ? (put.bidVol  * 100).toFixed(1) + '%' : '--'}</td>
+      <td className="px-1 py-1 text-left text-ink-3 text-[11px] whitespace-nowrap">{put?.markVol ? (put.markVol * 100).toFixed(1) + '%' : '--'}</td>
+      <td className="px-1 py-1 text-left text-ink-3 text-[11px] whitespace-nowrap">{put?.askVol  ? (put.askVol  * 100).toFixed(1) + '%' : '--'}</td>
+      <td className="px-2 py-1 text-left text-ink-3 whitespace-nowrap">{put ? fmtG(put.delta) : '--'}</td>
+      <td className="px-2 py-1 text-left text-ink-3 whitespace-nowrap">{put ? fmtG(put.gamma, 5) : '--'}</td>
+      <td className="px-2 py-1 text-left text-ink-3 whitespace-nowrap">{put ? fmtG(put.theta) : '--'}</td>
+      <td className="px-2 py-1 text-left text-ink-3 whitespace-nowrap">{put ? fmtG(put.vega) : '--'}</td>
     </tr>
   )
 }
 
-const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit']
+const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit', 'derive', 'binance']
 const EX_LABEL: Record<ExchangeKey, string> = EX_LABEL_MAP as Record<ExchangeKey, string>
 const EX_COLOR: Record<ExchangeKey, string> = EX_BADGE as Record<ExchangeKey, string>
 
 export default function CombinedOptionsChain({ data, spotPrice, expiration, lastUpdated, boxSpreads, activeExchanges: activeExchangesProp, onToggleExchange }: CombinedOptionsChainProps) {
   const [feesOn, setFeesOn] = useState(false)
   const [localExchanges, setLocalExchanges] = useState<Set<ExchangeKey>>(new Set(ALL_EXCHANGES))
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const strikeHeaderRef = useRef<HTMLTableCellElement | null>(null)
+  const hasChainData = Boolean(data && data.calls && data.puts)
+  const sortedStrikes = hasChainData ? collectSortedStrikes(data) : []
+  const atmStrike = findAtmStrike(sortedStrikes, spotPrice)
 
   const activeExchanges = activeExchangesProp ?? localExchanges
+
+  useEffect(() => {
+    if (!hasChainData || sortedStrikes.length === 0) return
+
+    const scrollEl = scrollRef.current
+    const strikeEl = strikeHeaderRef.current
+    if (!scrollEl || !strikeEl) return
+
+    const strikeCenter = strikeEl.offsetLeft + strikeEl.offsetWidth / 2
+    const target = strikeCenter - scrollEl.clientWidth / 2
+    const maxScroll = Math.max(0, scrollEl.scrollWidth - scrollEl.clientWidth)
+    scrollEl.scrollLeft = Math.min(Math.max(target, 0), maxScroll)
+  }, [expiration, hasChainData, spotPrice, sortedStrikes.length, activeExchanges.size])
 
   const toggleExchange = (ex: ExchangeKey) => {
     if (onToggleExchange) {
@@ -191,7 +240,7 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
     }
   }
 
-  if (!data || !data.calls || !data.puts) {
+  if (!hasChainData) {
     return (
       <div className="card flex items-center justify-center h-64">
         <p className="text-ink-2">Loading combined options data…</p>
@@ -199,19 +248,18 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
     )
   }
 
-  const allStrikes = new Set<number>()
-  data.calls.forEach(c => allStrikes.add(c.strike))
-  data.puts.forEach(p => allStrikes.add(p.strike))
-  const sortedStrikes = Array.from(allStrikes).sort((a, b) => a - b)
+  if (sortedStrikes.length === 0) {
+    return (
+      <div className="card flex items-center justify-center h-64">
+        <p className="text-ink-2">No combined options data for this expiry yet.</p>
+      </div>
+    )
+  }
 
   const callsMap = new Map<number, CombinedOptionContract>()
   const putsMap  = new Map<number, CombinedOptionContract>()
   data.calls.forEach(c => callsMap.set(c.strike, c))
   data.puts.forEach(p => putsMap.set(p.strike, p))
-
-  const atmStrike = sortedStrikes.reduce((prev, curr) =>
-    Math.abs(curr - spotPrice) < Math.abs(prev - spotPrice) ? curr : prev
-  )
 
   const strikeToBox = new Map<number, BoxSpread[]>()
   for (const b of (boxSpreads ?? [])) {
@@ -225,13 +273,16 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
 
   return (
     <div className="card">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 gap-4">
         <div>
           <h2 className="text-sm font-semibold text-ink">Combined Options Chain</h2>
           <p className="text-xs text-ink-3 mt-0.5">
             {new Date(expiration).toLocaleDateString()} · Fwd{' '}
             <span className="font-mono text-ink">${spotPrice.toLocaleString()}</span>
           </p>
+          <div className="mt-2">
+            <MoneynessLegend />
+          </div>
         </div>
 
         <div className="flex items-center gap-3">
@@ -267,8 +318,13 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
         </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
+      <div ref={scrollRef} className="overflow-x-auto">
+        <table className="min-w-full w-max table-fixed text-xs tabular-nums">
+          <colgroup>
+            {COL_WIDTHS.map((width, index) => (
+              <col key={index} style={{ width }} />
+            ))}
+          </colgroup>
           <thead>
             <tr className="border-b border-rim">
               <th colSpan={11} className="text-center py-1 text-green-700 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 text-xs">CALLS</th>
@@ -276,29 +332,27 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
               <th colSpan={11} className="text-center py-1 text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-900/20 text-xs">PUTS</th>
             </tr>
             <tr className="border-b border-rim text-ink-2 text-xs">
-              <th className="px-2 py-1 text-right font-medium">Best Bid</th>
+              <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" className="px-2 py-1" />
+              <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" className="px-2 py-1" />
+              <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" className="px-2 py-1" />
+              <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" className="px-2 py-1" />
+              <th className="px-1 py-1 text-right font-medium text-ink-3">aIV</th>
+              <th className="px-1 py-1 text-right font-medium text-ink-3">mIV</th>
+              <th className="px-1 py-1 text-right font-medium text-ink-3">bIV</th>
               <th className="px-1.5 py-1 text-right font-medium text-amber-600 dark:text-amber-400">APR</th>
               <th className="px-2 py-1 text-right font-medium">Best Ask</th>
-              <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" className="px-2 py-1" />
-              <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" className="px-2 py-1" />
-              <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" className="px-2 py-1" />
-              <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" className="px-2 py-1" />
-              <th className="px-1 py-1 text-right font-medium text-ink-3">bIV</th>
-              <th className="px-1 py-1 text-right font-medium text-ink-3">mIV</th>
-              <th className="px-1 py-1 text-right font-medium text-ink-3">aIV</th>
-              <th className="px-2 py-1 text-right font-medium">ITM</th>
-              <th className="px-3 py-1 text-center font-semibold text-ink">Strike</th>
-              <th className="px-2 py-1 text-left font-medium">ITM</th>
-              <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" align="left" className="px-2 py-1 text-left" />
-              <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" align="left" className="px-2 py-1 text-left" />
-              <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" align="left" className="px-2 py-1 text-left" />
-              <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" align="left" className="px-2 py-1 text-left" />
-              <th className="px-1 py-1 text-left font-medium text-ink-3">aIV</th>
-              <th className="px-1 py-1 text-left font-medium text-ink-3">mIV</th>
-              <th className="px-1 py-1 text-left font-medium text-ink-3">bIV</th>
+              <th className="px-2 py-1 text-right font-medium">Best Bid</th>
+              <th ref={strikeHeaderRef} className="px-3 py-1 text-center font-semibold text-ink">Strike</th>
+              <th className="px-2 py-1 text-left font-medium">Best Bid</th>
               <th className="px-2 py-1 text-left font-medium">Best Ask</th>
               <th className="px-1.5 py-1 text-left font-medium text-amber-600 dark:text-amber-400">APR</th>
-              <th className="px-2 py-1 text-left font-medium">Best Bid</th>
+              <th className="px-1 py-1 text-left font-medium text-ink-3">bIV</th>
+              <th className="px-1 py-1 text-left font-medium text-ink-3">mIV</th>
+              <th className="px-1 py-1 text-left font-medium text-ink-3">aIV</th>
+              <GreekTh symbol="Δ" name="Delta" description="price change per $1 move in underlying" align="left" className="px-2 py-1 text-left" />
+              <GreekTh symbol="Γ" name="Gamma" description="rate of change of delta per $1 move" align="left" className="px-2 py-1 text-left" />
+              <GreekTh symbol="Θ" name="Theta" description="daily time decay in USD" align="left" className="px-2 py-1 text-left" />
+              <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" align="left" className="px-2 py-1 text-left" />
             </tr>
           </thead>
           <tbody>
@@ -314,6 +368,7 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
                 activeExchanges={activeExchanges}
                 boxForStrike={strikeToBox.get(strike)}
                 daysToExpiry={daysToExpiry}
+                atmStrike={atmStrike}
               />
             ))}
           </tbody>
@@ -323,7 +378,7 @@ export default function CombinedOptionsChain({ data, spotPrice, expiration, last
       <div className="mt-3 pt-3 border-t border-rim grid grid-cols-4 gap-4 text-xs">
         <div><div className="text-ink-3">Total Calls</div><div className="text-ink font-semibold">{data.calls.length}</div></div>
         <div><div className="text-ink-3">Total Puts</div><div className="text-ink font-semibold">{data.puts.length}</div></div>
-        <div><div className="text-ink-3">ATM Strike</div><div className="text-ink font-semibold">{atmStrike.toLocaleString()}</div></div>
+        <div><div className="text-ink-3">ATM Strike</div><div className="text-ink font-semibold">{atmStrike?.toLocaleString() ?? '--'}</div></div>
         <div><div className="text-ink-3">Strikes</div><div className="text-ink font-semibold">{sortedStrikes.length}</div></div>
       </div>
     </div>

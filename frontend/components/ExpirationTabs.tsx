@@ -22,31 +22,27 @@ interface ExpirationTabsProps {
   onSelect: (expiration: string) => void
   optionsCounts: Record<string, { calls: number; puts: number }>
   arbExpiryStrategies?: Map<string, Set<string>>
-  expiryExchangeCounts?: Record<string, { bybit: number; okx: number; deribit: number }>
+  expiryExchangeCounts?: Record<string, { bybit: number; okx: number; deribit: number; derive: number; binance: number }>
 }
 
-// Exchange gradient colors — amber=Bybit, zinc=OKX, blue=Deribit
+// Exchange gradient colors — orange=Bybit, zinc=OKX, blue=Deribit, pink=Derive, yellow=Binance
 const EX_RGB = {
-  bybit:   '245,158,11',   // amber-500
+  bybit:   '234,88,12',    // orange-600
   okx:     '82,82,91',     // zinc-600
   deribit: '37,99,235',    // blue-600
+  derive:  '236,72,153',   // pink-500
+  binance: '250,204,21',   // yellow-400
 } as const
 
-function exchangeBarStyle(counts: { bybit: number; okx: number; deribit: number }): React.CSSProperties {
-  const total = counts.bybit + counts.okx + counts.deribit
-  if (total === 0) return {}
-  const sorted = (['bybit', 'okx', 'deribit'] as const)
+function buildExchangeSegments(counts: { bybit: number; okx: number; deribit: number; derive: number; binance: number }) {
+  return (['bybit', 'okx', 'deribit', 'derive', 'binance'] as const)
     .filter(ex => counts[ex] > 0)
     .sort((a, b) => counts[b] - counts[a])
-  const stops: string[] = []
-  let pos = 0
-  for (const ex of sorted) {
-    const pct = (counts[ex] / total) * 100
-    const color = `rgb(${EX_RGB[ex]})`
-    stops.push(`${color} ${pos.toFixed(1)}%`, `${color} ${(pos + pct).toFixed(1)}%`)
-    pos += pct
-  }
-  return { background: `linear-gradient(to right, ${stops.join(', ')})` }
+    .map(ex => ({
+      exchange: ex,
+      count: counts[ex],
+      color: `rgb(${EX_RGB[ex]})`,
+    }))
 }
 
 export default function ExpirationTabs({ expirations = [], selected, onSelect, optionsCounts, arbExpiryStrategies, expiryExchangeCounts }: ExpirationTabsProps) {
@@ -75,35 +71,42 @@ export default function ExpirationTabs({ expirations = [], selected, onSelect, o
             key={expiration}
             onClick={() => onSelect(expiration)}
             className={classNames(
-              'relative flex-shrink-0 px-2.5 py-1 rounded text-[10px] font-mono font-medium transition-colors whitespace-nowrap border overflow-hidden',
+              'relative flex-shrink-0 px-2.5 pt-1 pb-2 rounded text-[10px] font-mono font-medium transition-colors whitespace-nowrap border overflow-hidden',
               isSelected
                 ? 'bg-tone text-white border-tone'
                 : 'bg-muted text-ink-2 hover:text-ink border-rim'
             )}
           >
-            {exCounts && (
-              <span
-                className="absolute top-0 left-0 right-0 h-[3px] rounded-t"
-                style={exchangeBarStyle(exCounts)}
-              />
-            )}
-            {strategies && strategies.size > 0 && (
-              <div className="flex items-center justify-center gap-0.5 mt-0.5">
-                {STRATEGY_PIPS.filter(p => strategies.has(p.key)).map(p => (
+            <div className="flex items-center justify-center gap-0.5 h-2.5">
+              {strategies && STRATEGY_PIPS.filter(p => strategies.has(p.key)).map(p => (
+                <span
+                  key={p.key}
+                  title={p.title}
+                  className={classNames('w-1.5 h-1.5 rounded-full flex-shrink-0', p.color)}
+                />
+              ))}
+            </div>
+            <div>{formatDate(expiration)}</div>
+            <div className={classNames('text-[9px] mt-0.5', isSelected ? 'text-white/70' : 'text-ink-3')}>
+              {counts ? total : '\u00a0'}
+            </div>
+            {exCounts ? (
+              <div
+                className={classNames(
+                  'absolute left-1.5 right-1.5 bottom-1 flex h-1.5 overflow-hidden rounded-full',
+                  isSelected ? 'opacity-100' : 'opacity-80',
+                )}
+              >
+                {buildExchangeSegments(exCounts).map(({ exchange, count, color }) => (
                   <span
-                    key={p.key}
-                    title={p.title}
-                    className={classNames('w-1.5 h-1.5 rounded-full flex-shrink-0', p.color)}
+                    key={exchange}
+                    title={`${exchange.toUpperCase()}: ${count}`}
+                    className="h-full first:rounded-l-full last:rounded-r-full"
+                    style={{ backgroundColor: color, flexGrow: count }}
                   />
                 ))}
               </div>
-            )}
-            <div>{formatDate(expiration)}</div>
-            {counts && (
-              <div className={classNames('text-[9px] mt-0.5', isSelected ? 'text-white/70' : 'text-ink-3')}>
-                {total}
-              </div>
-            )}
+            ) : null}
           </button>
         )
       })}

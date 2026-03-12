@@ -4,6 +4,7 @@ import classNames from 'classnames'
 import { Sun, Moon } from 'lucide-react'
 import { Exchange } from '@/types/options'
 import { useTheme } from '@/components/ThemeProvider'
+import { getHeaderLinks } from '@/lib/publicRuntime.js'
 
 interface HeaderProps {
   exchange: Exchange
@@ -22,6 +23,7 @@ const EXCHANGES: { id: Exchange; label: string }[] = [
 
 export default function Header({ exchange, onExchangeChange, hideExchangeSelector = false }: HeaderProps) {
   const { theme, toggle } = useTheme()
+  const headerLinks = getHeaderLinks()
 
   return (
     <header className="bg-card border-b border-rim">
@@ -50,21 +52,11 @@ export default function Header({ exchange, onExchangeChange, hideExchangeSelecto
 
           <div className="flex-1" />
 
-          <a href="/analysis" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
-            Analysis
-          </a>
-          <a href="/polysis" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
-            Polysis
-          </a>
-          <a href="/optimizer" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
-            Optimizer
-          </a>
-          <a href="/builder" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
-            Strategy Builder
-          </a>
-          <a href="/portfolio" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
-            Portfolio
-          </a>
+          {headerLinks.map(({ href, label }) => (
+            <a key={href} href={href} target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
+              {label}
+            </a>
+          ))}
 
           <button
             onClick={toggle}

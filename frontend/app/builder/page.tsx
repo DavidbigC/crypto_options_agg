@@ -9,6 +9,7 @@ import PnLChart from '@/components/builder/PnLChart'
 import { Exchange, Leg, OptionsData, CONTRACT_SIZES } from '@/types/options'
 import { impliedVol } from '@/lib/blackScholes'
 import { EX_BADGE, EX_ACTIVE, EX_NAME } from '@/lib/exchangeColors'
+import { apiPath } from '@/lib/apiBase.js'
 
 // ── Futures leg adder ────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ function FuturesBar({ coin, spotPrice, onAdd }: {
   const [customPrice, setCustomPrice] = useState('')
 
   useEffect(() => {
-    fetch(`http://localhost:3500/api/futures/${coin}`)
+    fetch(apiPath(`futures/${coin}`))
       .then(r => r.json())
       .then(d => {
         const all: FuturesContract[] = d.futures ?? []
@@ -197,10 +198,10 @@ export default function BuilderPage() {
   }, [])
 
   const buildUrl = (ex: Exchange, c: string) =>
-    ex === 'okx'      ? `http://localhost:3500/api/okx/options/${OKX_FAMILY_MAP[c]}`
-    : ex === 'combined' ? `http://localhost:3500/api/combined/options/${c}`
-    : ex === 'deribit'  ? `http://localhost:3500/api/deribit/options/${c}`
-    : `http://localhost:3500/api/bybit/snapshot/${c}`
+    ex === 'okx'      ? apiPath(`okx/options/${OKX_FAMILY_MAP[c]}`)
+    : ex === 'combined' ? apiPath(`combined/options/${c}`)
+    : ex === 'deribit'  ? apiPath(`deribit/options/${c}`)
+    : apiPath(`bybit/snapshot/${c}`)
 
   useEffect(() => {
     const version = ++fetchVersion.current

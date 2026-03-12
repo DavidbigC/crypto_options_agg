@@ -264,9 +264,7 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
               <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('vegaPerDollar')} title="Vega per dollar spent. Higher = more vega per $ — better for longs.">V/${ind('vegaPerDollar')}</th>
               <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('vegaTheta')} title="Vega per dollar of daily theta. Higher = more vega per unit of carry — better for longs.">V/Θ{ind('vegaTheta')}</th>
               <th className={thCls('right', isShort ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')} onClick={() => handleSortCol('beIVMove')}>BE IV{ind('beIVMove')}</th>
-              {daysToEvent && (
-                <th className={thCls('right', 'text-amber-600 dark:text-amber-400')} onClick={() => handleSortCol('thetaToEvent')}>Θ→{fmtExpiry(eventDate)}{ind('thetaToEvent')}</th>
-              )}
+              <th className={classNames(thCls('right', 'text-amber-600 dark:text-amber-400'), !daysToEvent && 'invisible')} onClick={() => daysToEvent ? handleSortCol('thetaToEvent') : undefined}>Θ→{daysToEvent ? fmtExpiry(eventDate) : ''}{daysToEvent ? ind('thetaToEvent') : ''}</th>
               <th className="py-1 w-16" />
             </tr>
           </thead>
@@ -328,21 +326,19 @@ export default function VegaScanner({ optionsData, spotPrice, coin, exchange, ac
                       {row.beIVMove.toFixed(1)}%
                     </div>
                   </td>
-                  {daysToEvent && (
-                    <td className={classNames('py-1.5 text-right font-semibold font-mono', {
-                      'text-amber-600 dark:text-amber-400': isBest,
-                      'text-ink': !isBest,
-                    })}>
-                      {row.thetaToEvent != null ? (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <div className="w-12 h-1 bg-rim rounded-full overflow-hidden">
-                            <div className="h-full bg-amber-400 rounded-full" style={{ width: `${relWidthEvent}%` }} />
-                          </div>
-                          ${Math.round(row.thetaToEvent).toLocaleString()}
+                  <td className={classNames('py-1.5 text-right font-semibold font-mono', {
+                    'text-amber-600 dark:text-amber-400': daysToEvent && isBest,
+                    'text-ink': daysToEvent && !isBest,
+                    'invisible': !daysToEvent,
+                  })}>
+                    {daysToEvent && row.thetaToEvent != null ? (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="w-12 h-1 bg-rim rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-400 rounded-full" style={{ width: `${relWidthEvent}%` }} />
                         </div>
-                      ) : '--'}
-                    </td>
-                  )}
+                        ${Math.round(row.thetaToEvent).toLocaleString()}
+                      </div>
+                    ) : '--'}</td>
                   <td className="py-1.5 text-right">
                     <span className="text-[10px] text-ink-3 hover:text-tone">
                       {isShort ? '→ Sell' : '→ Build'}

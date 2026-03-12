@@ -11,8 +11,9 @@ import GammaScanner from '@/components/scanners/GammaScanner'
 import VegaScanner from '@/components/scanners/VegaScanner'
 import classNames from 'classnames'
 import { OptionsData, Exchange } from '@/types/options'
-type ExchangeKey = 'bybit' | 'okx' | 'deribit'
-const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit']
+import { apiPath, ssePath } from '@/lib/apiBase.js'
+type ExchangeKey = 'bybit' | 'okx' | 'deribit' | 'derive' | 'binance'
+const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit', 'derive', 'binance']
 import type { BoxSpread, ArbOpportunity } from '@/lib/strategies'
 import { filterExpirations } from '@/lib/filterExpirations'
 
@@ -48,7 +49,7 @@ export default function HomePage() {
 
     const coin = (ex: Exchange) => ex === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
     const expiryParam = selectedExpiration ? `?expiry=${selectedExpiration}` : ''
-    const evtSource = new EventSource(`http://localhost:3500/api/stream/${exchange}/${coin(exchange)}${expiryParam}`)
+    const evtSource = new EventSource(ssePath(`stream/${exchange}/${coin(exchange)}${expiryParam}`))
 
     evtSource.onmessage = (e) => {
       if (version !== fetchVersion.current) { evtSource.close(); return }
@@ -86,7 +87,7 @@ export default function HomePage() {
     if (exchange !== 'combined') return
     let cancelled = false
     const fetchArbs = () => {
-      fetch(`http://localhost:3500/api/arbs/${selectedCrypto}`)
+      fetch(apiPath(`arbs/${selectedCrypto}`))
         .then(r => r.json())
         .then(d => {
           if (cancelled || !d || d.error) return
@@ -120,15 +121,17 @@ export default function HomePage() {
   }
 
   const expiryExchangeCounts = useMemo(() => {
-    if (exchange !== 'combined' || !optionsData) return {} as Record<string, { bybit: number; okx: number; deribit: number }>
-    const result: Record<string, { bybit: number; okx: number; deribit: number }> = {}
+    if (exchange !== 'combined' || !optionsData) return {} as Record<string, { bybit: number; okx: number; deribit: number; derive: number; binance: number }>
+    const result: Record<string, { bybit: number; okx: number; deribit: number; derive: number; binance: number }> = {}
     for (const [expiry, chainData] of Object.entries(optionsData.data)) {
-      const counts = { bybit: 0, okx: 0, deribit: 0 }
+      const counts = { bybit: 0, okx: 0, deribit: 0, derive: 0, binance: 0 }
       const contracts = [...((chainData as any).calls ?? []), ...((chainData as any).puts ?? [])]
       for (const c of contracts) {
-        if (activeExchanges.has('bybit')   && (c.prices?.bybit?.bid > 0   || c.prices?.bybit?.ask > 0))   counts.bybit++
-        if (activeExchanges.has('okx')     && (c.prices?.okx?.bid > 0     || c.prices?.okx?.ask > 0))     counts.okx++
-        if (activeExchanges.has('deribit') && (c.prices?.deribit?.bid > 0 || c.prices?.deribit?.ask > 0)) counts.deribit++
+        // Count by best bid/ask exchange — matches the badges shown in the chain
+        const bidEx = (c as any).bestBidEx as ExchangeKey | null
+        const askEx = (c as any).bestAskEx as ExchangeKey | null
+        if (bidEx && activeExchanges.has(bidEx)) counts[bidEx]++
+        if (askEx && askEx !== bidEx && activeExchanges.has(askEx)) counts[askEx]++
       }
       result[expiry] = counts
     }
@@ -222,23 +225,27 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div className={activeScanner === 'gamma' ? '' : 'hidden'}>
-          <GammaScanner
-            optionsData={optionsData}
-            spotPrice={spotPrice}
-            coin={selectedCrypto}
-            exchange={exchange}
-            activeExchanges={activeExchanges}
-          />
+        <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${activeScanner === 'gamma' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+          <div className="overflow-hidden">
+            <GammaScanner
+              optionsData={optionsData}
+              spotPrice={spotPrice}
+              coin={selectedCrypto}
+              exchange={exchange}
+              activeExchanges={activeExchanges}
+            />
+          </div>
         </div>
-        <div className={activeScanner === 'vega' ? '' : 'hidden'}>
-          <VegaScanner
-            optionsData={optionsData}
-            spotPrice={spotPrice}
-            coin={selectedCrypto}
-            exchange={exchange}
-            activeExchanges={activeExchanges}
-          />
+        <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${activeScanner === 'vega' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+          <div className="overflow-hidden">
+            <VegaScanner
+              optionsData={optionsData}
+              spotPrice={spotPrice}
+              coin={selectedCrypto}
+              exchange={exchange}
+              activeExchanges={activeExchanges}
+            />
+          </div>
         </div>
 
         {/* Options chain */}

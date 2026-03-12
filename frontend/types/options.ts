@@ -1,16 +1,18 @@
-export type Exchange = 'bybit' | 'okx' | 'combined' | 'deribit' | 'derive'
+export type Exchange = 'bybit' | 'okx' | 'combined' | 'deribit' | 'derive' | 'binance'
 
 export interface CombinedOptionContract {
   strike: number
   optionType: 'call' | 'put'
   bestBid: number
-  bestBidEx: 'bybit' | 'okx' | 'deribit' | null
+  bestBidEx: 'bybit' | 'okx' | 'deribit' | 'derive' | 'binance' | null
   bestAsk: number
-  bestAskEx: 'bybit' | 'okx' | 'deribit' | null
+  bestAskEx: 'bybit' | 'okx' | 'deribit' | 'derive' | 'binance' | null
   prices: {
     bybit:   { bid: number; ask: number }
     okx:     { bid: number; ask: number }
     deribit: { bid: number; ask: number }
+    derive:  { bid: number; ask: number }
+    binance: { bid: number; ask: number }
   }
   delta: number
   gamma: number
@@ -82,6 +84,7 @@ export const CONTRACT_SIZES: Record<string, Record<string, number>> = {
   combined:{ BTC: 1, ETH: 1, SOL: 1 },
   deribit: { BTC: 1, ETH: 1, SOL: 1 },
   derive:  { BTC: 1, ETH: 1, SOL: 1 },
+  binance: { BTC: 1, ETH: 1, SOL: 1 },
 }
 
 export interface Leg {

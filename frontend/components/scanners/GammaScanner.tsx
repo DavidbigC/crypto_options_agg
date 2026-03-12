@@ -267,9 +267,7 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
               <th className={thCls('right', `text-${accentColor}-600 dark:text-${accentColor}-400`)} onClick={() => handleSortCol('bePct')}>BE%{ind('bePct')}</th>
               <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('gammaDollar')} title="Gamma per dollar spent. Higher = more gamma per $ — better for longs, worse for shorts.">Γ/${ind('gammaDollar')}</th>
               <th className={thCls('right', 'text-ink-3')} onClick={() => handleSortCol('gammaTheta')} title="Gamma per dollar of daily theta. Higher = more gamma per unit of carry — better for longs, worse for shorts.">Γ/Θ{ind('gammaTheta')}</th>
-              {daysToEvent && (
-                <th className={thCls('right', 'text-amber-600 dark:text-amber-400')} onClick={() => handleSortCol('beToEvent')}>BE→{fmtExpiry(eventDate)}{ind('beToEvent')}</th>
-              )}
+              <th className={classNames(thCls('right', 'text-amber-600 dark:text-amber-400'), !daysToEvent && 'invisible')} onClick={() => daysToEvent ? handleSortCol('beToEvent') : undefined}>BE→{daysToEvent ? fmtExpiry(eventDate) : ''}{daysToEvent ? ind('beToEvent') : ''}</th>
               <th className="py-1 w-16" />
             </tr>
           </thead>
@@ -334,21 +332,20 @@ export default function GammaScanner({ optionsData, spotPrice, coin, exchange, a
                   <td className="py-1.5 text-right font-mono text-ink-3" title="Gamma per dollar of daily theta">
                     {row.gammaTheta.toExponential(2)}
                   </td>
-                  {daysToEvent && (
-                    <td className={classNames('py-1.5 text-right font-semibold font-mono', {
-                      'text-amber-600 dark:text-amber-400': isBest,
-                      'text-ink': !isBest,
-                    })}>
-                      {row.beToEvent ? (
-                        <div className="flex items-center justify-end gap-1.5">
-                          <div className="w-12 h-1 bg-rim rounded-full overflow-hidden">
-                            <div className="h-full bg-amber-400 rounded-full" style={{ width: `${relWidthEvent}%` }} />
-                          </div>
-                          ${Math.round(row.beToEvent).toLocaleString()}
+                  <td className={classNames('py-1.5 text-right font-semibold font-mono', {
+                    'text-amber-600 dark:text-amber-400': daysToEvent && isBest,
+                    'text-ink': daysToEvent && !isBest,
+                    'invisible': !daysToEvent,
+                  })}>
+                    {daysToEvent && row.beToEvent ? (
+                      <div className="flex items-center justify-end gap-1.5">
+                        <div className="w-12 h-1 bg-rim rounded-full overflow-hidden">
+                          <div className="h-full bg-amber-400 rounded-full" style={{ width: `${relWidthEvent}%` }} />
                         </div>
-                      ) : '--'}
-                    </td>
-                  )}
+                        ${Math.round(row.beToEvent).toLocaleString()}
+                      </div>
+                    ) : '--'}
+                  </td>
                   <td className="py-1.5 text-right">
                     <span className="text-[10px] text-ink-3 hover:text-tone">
                       {isShort ? '→ Sell' : '→ Build'}

@@ -1,4 +1,6 @@
 /** @type {import('next').NextConfig} */
+const backendBaseUrl = process.env.BACKEND_BASE_URL || 'http://localhost:3500'
+
 const nextConfig = {
   reactStrictMode: true,
   swcMinify: true,
@@ -6,7 +8,7 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: 'http://localhost:3500/api/:path*',
+        destination: `${backendBaseUrl}/api/:path*`,
       },
     ]
   },

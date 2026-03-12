@@ -45,6 +45,7 @@ test('resolveCloseoutPrice uses exchange-specific combined quotes before falling
       bybit: { bid: 7850, ask: 7390 },
       okx: { bid: 7800, ask: 7350 },
       deribit: { bid: 0, ask: 0 },
+      derive: { bid: 7825, ask: 7340 },
     },
   }
 
@@ -64,5 +65,14 @@ test('resolveCloseoutPrice uses exchange-specific combined quotes before falling
       fallbackPrice: 7760,
     }),
     7390,
+  )
+
+  assert.equal(
+    resolveCloseoutPrice({
+      leg: { side: 'sell', type: 'call', exchange: 'derive' },
+      contract: combinedContract,
+      fallbackPrice: 7760,
+    }),
+    7340,
   )
 })

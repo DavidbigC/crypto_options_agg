@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import classNames from 'classnames'
 import { EX_ACTIVE, EX_NAME } from '@/lib/exchangeColors'
+import { apiPath } from '@/lib/apiBase.js'
 
 interface FuturesContract {
   symbol: string
@@ -34,7 +35,7 @@ export default function FuturesBar({
   const [customPrice, setCustomPrice] = useState('')
 
   useEffect(() => {
-    fetch(`http://localhost:3500/api/futures/${coin}`)
+    fetch(apiPath(`futures/${coin}`))
       .then((r) => r.json())
       .then((d) => {
         const all: FuturesContract[] = d.futures ?? []

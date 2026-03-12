@@ -43,24 +43,44 @@ import { createOkxPortfolioService } from './lib/okx-portfolio.js'
 import { createBybitPortfolioService } from './lib/bybit-portfolio.js'
 import { getEnvPaths } from './lib/env-paths.js'
 import { buildCombinedResponse as buildCombinedResponseFromLib } from './lib/combined.js'
+import { getRuntimeConfig, isCorsOriginAllowed } from './lib/runtime-config.js'
+import { registerOptionalRoutes } from './lib/optional-routes.js'
+import { createRateLimiter } from './lib/rate-limit.js'
+import { createPolymarketSurfaceBroadcaster } from './lib/polymarket-sse.js'
 
 
 const backendDir = path.dirname(fileURLToPath(import.meta.url))
-for (const envPath of getEnvPaths(backendDir)) {
-  dotenv.config({ path: envPath })
+const runtimeConfig = getRuntimeConfig()
+if (runtimeConfig.loadDotenv) {
+  for (const envPath of getEnvPaths(backendDir)) {
+    dotenv.config({ path: envPath })
+  }
 }
 
 const app = express();
 const PORT = process.env.PORT || 3500;
-const okxPortfolioService = createOkxPortfolioService({ env: process.env })
-const bybitPortfolioService = createBybitPortfolioService({ env: process.env })
+const okxPortfolioService = runtimeConfig.enablePortfolio
+  ? createOkxPortfolioService({ env: process.env })
+  : null
+const bybitPortfolioService = runtimeConfig.enablePortfolio
+  ? createBybitPortfolioService({ env: process.env })
+  : null
 const polymarketService = createPolymarketService({ livePriceLookup: lookupPolymarketPrice })
 const polymarketRouteHandler = createPolymarketRouteHandler({ service: polymarketService })
 const polymarketSurfaceRouteHandler = createPolymarketSurfaceRouteHandler({ service: polymarketService })
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin(origin, callback) {
+    if (isCorsOriginAllowed(origin, runtimeConfig)) return callback(null, true)
+    return callback(new Error('Origin not allowed by CORS'))
+  },
+}));
 app.use(express.json());
+if (runtimeConfig.appMode === 'public') {
+  app.use('/api', createRateLimiter({ limit: 120, windowMs: 60_000 }))
+  app.use('/api/stream', createRateLimiter({ limit: 20, windowMs: 60_000 }))
+}
 
 // Initialize Bybit API
 const bybitApi = new BybitOptionsAPI();
@@ -183,6 +203,12 @@ function buildCombinedResponse(baseCoin) {
 
 const sseClients = new Map() // key: 'exchange:coin' → Map<ServerResponse, {expiry}>
 const polymarketTokenAssetMap = new Map()
+const polymarketSurfaceBroadcaster = createPolymarketSurfaceBroadcaster({
+  service: polymarketService,
+  clientsByKey: sseClients,
+  registerAssetTokens: registerPolymarketAssetTokens,
+  subscribeAssetIds: subscribePolymarketAssetIds,
+})
 
 const VALID_EXCHANGES = new Set(['bybit', 'okx', 'deribit', 'derive', 'binance', 'combined'])
 const VALID_COINS     = new Set(['BTC', 'ETH', 'SOL'])
@@ -231,27 +257,10 @@ function registerPolymarketAssetTokens(asset, surface) {
 }
 
 async function emitPolymarketSurface(asset) {
-  const key = `polymarket:${asset}`
-  const clients = sseClients.get(key)
-  if (!clients?.size) return
-
-  for (const [res, opts] of clients.entries()) {
-    try {
-      const surface = await polymarketService.getSurface({
-        asset,
-        spotPrice: Number(opts?.spotPrice ?? 0) || 0,
-      })
-      registerPolymarketAssetTokens(asset, surface)
-      subscribePolymarketAssetIds(
-        Object.values(surface?.horizons ?? {}).flatMap((horizon) =>
-          (horizon?.sourceMarkets ?? []).flatMap((market) => market.tokenIds ?? (market.tokenId ? [market.tokenId] : [])).filter(Boolean),
-        ),
-      )
-      res.write(`data: ${JSON.stringify(surface)}\n\n`)
-    } catch (err) {
-      console.error(`Polymarket SSE write error (${asset}), removing client:`, err.message)
-      clients.delete(res)
-    }
+  try {
+    await polymarketSurfaceBroadcaster.broadcastAsset(asset)
+  } catch (err) {
+    console.error(`Polymarket SSE write error (${asset}):`, err.message)
   }
 }
 
@@ -610,28 +619,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.get('/api/portfolio/okx', async (req, res) => {
-  try {
-    const portfolio = await okxPortfolioService.fetchPortfolio()
-    res.json(portfolio)
-  } catch (error) {
-    const message = error?.message || 'Internal server error'
-    const status = /missing okx credentials/i.test(message) ? 503 : 502
-    res.status(status).json({ error: message })
-  }
-})
-
-app.get('/api/portfolio/bybit', async (req, res) => {
-  try {
-    const portfolio = await bybitPortfolioService.fetchPortfolio()
-    res.json(portfolio)
-  } catch (error) {
-    const message = error?.message || 'Internal server error'
-    const status = /missing bybit credentials/i.test(message) ? 503 : 502
-    res.status(status).json({ error: message })
-  }
-})
-
 // ─── OKX Helpers ────────────────────────────────────────────────────────────
 
 function parseOkxInstId(instId) {
@@ -932,13 +919,7 @@ app.get('/api/stream/polymarket/:asset', async (req, res) => {
   res.write('retry: 1000\n\n')
 
   try {
-    const surface = await polymarketService.getSurface({ asset, spotPrice })
-    registerPolymarketAssetTokens(asset, surface)
-    subscribePolymarketAssetIds(
-      Object.values(surface?.horizons ?? {}).flatMap((horizon) =>
-        (horizon?.sourceMarkets ?? []).flatMap((market) => market.tokenIds ?? (market.tokenId ? [market.tokenId] : [])).filter(Boolean),
-      ),
-    )
+    const surface = await polymarketSurfaceBroadcaster.fetchSurface(asset, spotPrice)
     res.write(`data: ${JSON.stringify(surface)}\n\n`)
   } catch (error) {
     res.write(`data: ${JSON.stringify({ error: error?.message || 'Polymarket surface unavailable' })}\n\n`)
@@ -1072,30 +1053,13 @@ app.get('/api/scanners/:exchange/:coin', (req, res) => {
   res.json(cached)
 })
 
-app.post('/api/optimizer/:coin', (req, res) => {
-  const coin    = req.params.coin.toUpperCase()
-  const VALID_COINS = ['BTC', 'ETH', 'SOL']
-  if (!VALID_COINS.includes(coin)) return res.status(400).json({ error: `Unsupported coin: ${coin}` })
-
-  const VALID_EXCHANGES = ['bybit', 'okx', 'deribit']
-  const { targets = {}, maxCost = 0, maxLegs = 4, targetExpiry = null, exchanges: rawExchanges } = req.body
-  const exchanges = Array.isArray(rawExchanges)
-    ? rawExchanges.filter(e => VALID_EXCHANGES.includes(e))
-    : VALID_EXCHANGES
-  const activeExchanges = exchanges.length > 0 ? exchanges : VALID_EXCHANGES
-
-  try {
-    const combined  = buildCombinedResponse(coin)
-    if (!combined) return res.json([])
-
-    const spotPrice = combined.spotPrice || 0
-    const futures   = futuresCache[coin] ?? []
-    const results   = runOptimizer(combined, spotPrice, futures, targets, maxCost, Math.min(maxLegs, 6), targetExpiry || null, activeExchanges)
-    res.json(results)
-  } catch (err) {
-    console.error('optimizer error:', err)
-    res.status(500).json({ error: err.message })
-  }
+registerOptionalRoutes(app, {
+  runtimeConfig,
+  okxPortfolioService,
+  bybitPortfolioService,
+  buildCombinedResponse,
+  runOptimizer,
+  futuresCache,
 })
 
 // Debug: inspect raw Derive cache to see actual field names

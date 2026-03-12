@@ -11,9 +11,10 @@ import { deribitGreeksCache } from './deribit-ws.js'
 const DERIBIT_BASE = 'https://www.deribit.com/api/v2'
 
 const DERIBIT_COINS = {
-  BTC: { currency: 'BTC',      priceInCoin: true,  indexName: 'btc_usd' },
-  ETH: { currency: 'ETH',      priceInCoin: true,  indexName: 'eth_usd' },
-  SOL: { currency: 'SOL_USDC', priceInCoin: false, indexName: 'sol_usd' },
+  BTC: { currency: 'BTC',  priceInCoin: true,  indexName: 'btc_usd' },
+  ETH: { currency: 'ETH',  priceInCoin: true,  indexName: 'eth_usd' },
+  // SOL options are USDC-settled → listed under currency=USDC, instrument names start with SOL_USDC-
+  SOL: { currency: 'USDC', priceInCoin: false, indexName: 'sol_usd', instrumentPrefix: 'SOL_USDC' },
 }
 
 export const deribitCache = {
@@ -87,7 +88,10 @@ export async function pollDeribitOptions(coin) {
       return
     }
 
-    deribitCache[coin].summaries = json.result
+    const all = json.result
+    deribitCache[coin].summaries = config.instrumentPrefix
+      ? all.filter(s => s.instrument_name.startsWith(config.instrumentPrefix))
+      : all
   } catch (err) {
     console.error(`Deribit poll error (${coin}):`, err.message)
   }

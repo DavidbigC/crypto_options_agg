@@ -20,6 +20,11 @@ Legacy research material and local-only experiments are intentionally left out o
 - Position builder and portfolio pages
 - Backend services for streaming and polling market data
 
+Hosted public mode intentionally disables sensitive pages and APIs:
+
+- `/portfolio`
+- `/optimizer`
+
 ## Repo layout
 
 ```text
@@ -37,6 +42,13 @@ Legacy research material and local-only experiments are intentionally left out o
 - Node.js 18+
 - npm
 
+## Modes
+
+The app now supports two runtime modes.
+
+- `private`: local/dev mode with dotenv loading enabled by default and all pages available
+- `public`: hosted mode with dotenv loading disabled by default, portfolio disabled, and optimizer disabled
+
 ## Local development
 
 Install and run both services with:
@@ -52,6 +64,8 @@ That script:
 - seeds `backend/.env` from `backend/.env.example` if needed
 - starts the backend on `http://localhost:3500`
 - starts the frontend on `http://localhost:3000`
+
+`start.sh` is for local/private use only. It is not the production startup path.
 
 If you prefer to run each service manually:
 
@@ -70,17 +84,47 @@ npm run dev
 
 ## Environment
 
-The backend reads `backend/.env`. The checked-in example is enough for local startup; the only required runtime setting in the current codepath is `PORT`, which defaults to `3500`.
+### Local/private mode
+
+The backend reads local `.env` files by default. The checked-in example is enough for local startup; the only required runtime setting in the current codepath is `PORT`, which defaults to `3500`.
 
 If you add private exchange credentials or other local settings, keep them in ignored `.env` files only.
+
+### Hosted/public mode
+
+Do not place a `.env` file on the host server.
+
+Use host-injected environment variables only. Minimum recommended settings:
+
+```bash
+APP_MODE=public
+LOAD_DOTENV=false
+ENABLE_PORTFOLIO=false
+ENABLE_OPTIMIZER=false
+CORS_ORIGINS=https://your-domain.example
+BACKEND_BASE_URL=http://127.0.0.1:3500
+NEXT_PUBLIC_APP_MODE=public
+NEXT_PUBLIC_ENABLE_PORTFOLIO=false
+NEXT_PUBLIC_ENABLE_OPTIMIZER=false
+```
+
+Notes:
+
+- `BACKEND_BASE_URL` is used by the Next.js `/api` rewrite
+- `NEXT_PUBLIC_*` values must be present when building the frontend for production
+- hosted public mode should not receive OKX or Bybit portfolio credentials
 
 ## Key app areas
 
 - `/`: main options chain and scanner surface
-- `/optimizer`: multi-leg strategy optimizer
 - `/builder`: position builder
-- `/portfolio`: portfolio tools
 - `/analysis`: analysis workspace
+- `/polysis`: Polymarket probability surface
+
+Private-only areas:
+
+- `/optimizer`: multi-leg strategy optimizer
+- `/portfolio`: portfolio tools
 
 ## Notes for GitHub
 
@@ -95,6 +139,14 @@ This repository is being kept intentionally narrow for publishing:
 - Backend entrypoint: `backend/server.js`
 - Frontend entrypoint: `frontend/app/page.tsx`
 - Package manifests live in `backend/package.json` and `frontend/package.json`
+- Hosted mode design: `docs/plans/2026-03-12-hosted-public-mode-design.md`
+
+## Production notes
+
+- Browser API calls use relative `/api/...` paths so the frontend can run behind your server domain
+- Public mode applies CORS allowlisting and basic in-memory request limiting
+- Public mode does not mount portfolio or optimizer backend routes
+- Public mode returns `notFound()` for the portfolio and optimizer frontend pages
 
 ## License
 

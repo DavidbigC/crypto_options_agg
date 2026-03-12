@@ -12,6 +12,7 @@ import {
   YAxis,
 } from 'recharts'
 import Header from '@/components/Header'
+import { apiPath, ssePath } from '@/lib/apiBase.js'
 import {
   buildPolysisDistributionChartData,
   buildPolysisExpirySeries,
@@ -99,7 +100,7 @@ export default function PolysisPage() {
 
     async function loadReferenceSpot() {
       try {
-        const response = await fetch(`http://localhost:3500/api/combined/options/${asset}`)
+        const response = await fetch(apiPath(`combined/options/${asset}`))
         const raw = await response.json().catch(() => ({}))
         if (!cancelled) {
           const nextSpot = Number(raw?.spotPrice ?? 0)
@@ -122,7 +123,7 @@ export default function PolysisPage() {
 
     const activeSpot = Number(spotPrice) > 0 ? Number(spotPrice) : referenceSpot
     const query = activeSpot && activeSpot > 0 ? `?spotPrice=${encodeURIComponent(activeSpot)}` : ''
-    const eventSource = new EventSource(`http://localhost:3500/api/stream/polymarket/${asset}${query}`)
+    const eventSource = new EventSource(ssePath(`stream/polymarket/${asset}${query}`))
 
     eventSource.onmessage = (event) => {
       try {
