@@ -16,6 +16,7 @@ const EXCHANGES: { id: Exchange; label: string }[] = [
   { id: 'okx',      label: 'OKX' },
   { id: 'deribit',  label: 'Deribit' },
   { id: 'derive',   label: 'Derive' },
+  { id: 'binance',  label: 'Binance' },
   { id: 'combined', label: 'Combined' },
 ]
 
@@ -51,6 +52,9 @@ export default function Header({ exchange, onExchangeChange, hideExchangeSelecto
 
           <a href="/analysis" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
             Analysis
+          </a>
+          <a href="/polysis" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
+            Polysis
           </a>
           <a href="/optimizer" target="_blank" rel="noopener noreferrer" className="text-xs text-ink-2 hover:text-ink transition-colors">
             Optimizer
