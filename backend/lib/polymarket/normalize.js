@@ -84,3 +84,100 @@ export function classifyPolymarketMarket(market = {}) {
     reason: 'Ambiguous market title',
   }
 }
+
+function clampProbability(value) {
+  if (!Number.isFinite(value)) return 0
+  return Math.max(0, Math.min(1, value))
+}
+
+function roundProbability(value) {
+  return Number(clampProbability(value).toFixed(6))
+}
+
+function toDistributionEntry(market) {
+  const classification = classifyPolymarketMarket(market)
+  const probability = clampProbability(Number(market.lastTradePrice))
+  return {
+    ...classification,
+    probability,
+  }
+}
+
+export function buildDistributionFromMarkets(markets = []) {
+  const classified = markets.map(toDistributionEntry)
+  const rangeMarkets = classified
+    .filter((market) => market.type === 'range')
+    .sort((a, b) => a.range.low - b.range.low)
+
+  if (rangeMarkets.length) {
+    return {
+      source: 'range',
+      bins: rangeMarkets.map((market) => ({
+        low: market.range.low,
+        high: market.range.high,
+        probability: market.probability,
+      })),
+      excludedPathMarkets: classified.filter((market) => market.type === 'path').length,
+    }
+  }
+
+  const thresholdMarkets = classified
+    .filter((market) => market.type === 'threshold' && market.direction === 'above')
+    .sort((a, b) => a.strike - b.strike)
+
+  if (thresholdMarkets.length >= 2) {
+    const bins = []
+    for (let index = 0; index < thresholdMarkets.length; index++) {
+      const current = thresholdMarkets[index]
+      const next = thresholdMarkets[index + 1] ?? null
+      const nextProbability = next ? next.probability : 0
+      bins.push({
+        low: current.strike,
+        high: next?.strike ?? null,
+        probability: roundProbability(current.probability - nextProbability),
+      })
+    }
+
+    return {
+      source: 'threshold',
+      bins: bins.filter((bin) => bin.probability > 0),
+      excludedPathMarkets: classified.filter((market) => market.type === 'path').length,
+    }
+  }
+
+  return {
+    source: 'none',
+    bins: [],
+    excludedPathMarkets: classified.filter((market) => market.type === 'path').length,
+  }
+}
+
+export function summarizeDistribution(distribution, spotPrice) {
+  const bins = distribution?.bins ?? []
+  if (!bins.length || !Number.isFinite(spotPrice) || spotPrice <= 0) {
+    return {
+      expectedPrice: null,
+      expectedMove: null,
+      expectedMovePct: null,
+      mostLikelyRange: null,
+    }
+  }
+
+  const expectedPrice = bins.reduce((sum, bin) => {
+    const midpoint = bin.high === null ? bin.low : (bin.low + bin.high) / 2
+    return sum + midpoint * bin.probability
+  }, 0)
+
+  const mostLikelyRange = bins.reduce((best, bin) =>
+    !best || bin.probability > best.probability ? bin : best
+  , null)
+
+  const expectedMove = Math.abs(expectedPrice - spotPrice)
+
+  return {
+    expectedPrice: Math.round(expectedPrice),
+    expectedMove: Math.round(expectedMove),
+    expectedMovePct: Number(((expectedMove / spotPrice) * 100).toFixed(2)),
+    mostLikelyRange,
+  }
+}
