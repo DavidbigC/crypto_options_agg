@@ -266,7 +266,7 @@ export function summarizePathMarkets(markets = [], spotPrice) {
     }
   }
 
-  const pathMovePct = upsidePathPct + downsidePathPct
+  const pathMovePct = (upsidePathPct + downsidePathPct) / 2
 
   return {
     pathMovePct: Number(pathMovePct.toFixed(2)),

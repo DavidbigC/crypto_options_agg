@@ -73,8 +73,8 @@ test('summarizePathMarkets returns a single path move metric with upside and dow
     { question: 'Will Bitcoin dip to $70,000 in March?', lastTradePrice: 0.3 },
   ], 80000)
 
-  assert.equal(summary.pathMovePct, 7.5)
-  assert.equal(summary.pathMoveUsd, 6000)
+  assert.equal(summary.pathMovePct, 3.75)
+  assert.equal(summary.pathMoveUsd, 3000)
   assert.equal(summary.upsidePathPct, 3.75)
   assert.equal(summary.downsidePathPct, 3.75)
   assert.equal(summary.strongestUpsideBarrier, 90000)

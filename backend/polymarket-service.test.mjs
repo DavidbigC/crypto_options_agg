@@ -647,7 +647,7 @@ test('createPolymarketService keeps path markets as volatility stress inputs whe
   assert.equal(result.distribution.source, 'none')
   assert.equal(result.pathMarkets.length, 2)
   assert.equal(result.pathMarkets[0].classification.type, 'path')
-  assert.equal(result.pathSummary.pathMovePct, 6.11)
+  assert.equal(result.pathSummary.pathMovePct, 3.06)
   assert.equal(result.pathSummary.upsidePathPct, 6.11)
   assert.equal(result.pathSummary.downsidePathPct, 0)
 })
