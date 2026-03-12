@@ -69,6 +69,19 @@ const ASSET_QUERY = {
   SOL: 'solana',
 }
 
+function formatMonthDay(timestamp) {
+  const date = new Date(timestamp)
+  const month = date.toLocaleDateString('en-US', { month: 'long', timeZone: 'UTC' }).toLowerCase()
+  const day = date.toLocaleDateString('en-US', { day: 'numeric', timeZone: 'UTC' })
+  return `${month} ${day}`
+}
+
+function buildSearchQuery(asset, horizon, now) {
+  const assetQuery = ASSET_QUERY[asset] ?? asset.toLowerCase()
+  if (horizon === 'daily') return `${assetQuery} on ${formatMonthDay(now)}`
+  return `${assetQuery} ${horizon}`
+}
+
 function inferAssetFromEvent(event = {}, market = {}) {
   const tagSlugs = Array.isArray(event.tags) ? event.tags.map((tag) => String(tag.slug ?? '').toLowerCase()) : []
   const texts = [
@@ -133,8 +146,21 @@ function selectNearestEventMarkets(markets) {
     grouped.get(eventSlug).push(market)
   }
 
+  function groupScore(group) {
+    return group.reduce((score, market) => {
+      const type = classifyPolymarketMarket(market).type
+      return score + (type === 'unknown' ? 0 : 1)
+    }, 0)
+  }
+
   const sortedGroups = Array.from(grouped.values()).sort((left, right) => {
-    return eventEndTime(left[0]) - eventEndTime(right[0])
+    const scoreDelta = groupScore(right) - groupScore(left)
+    if (scoreDelta !== 0) return scoreDelta
+    const endDelta = eventEndTime(left[0]) - eventEndTime(right[0])
+    if (endDelta !== 0) return endDelta
+    const sizeDelta = right.length - left.length
+    if (sizeDelta !== 0) return sizeDelta
+    return 0
   })
 
   return sortedGroups[0] ?? []
@@ -145,10 +171,11 @@ export function createPolymarketService({
   minVolume = 100,
   minOpenInterest = 100,
   maxSpreadPct = 1,
+  now = () => Date.now(),
 } = {}) {
   return {
     async getAnalysis({ asset, horizon, spotPrice }) {
-      const searchPayload = await client.searchGamma(ASSET_QUERY[asset] ?? asset.toLowerCase(), 25)
+      const searchPayload = await client.searchGamma(buildSearchQuery(asset, horizon, now()), 25)
       const discoveredMarkets = flattenDiscoveredMarkets(searchPayload)
       const relevantMarkets = discoveredMarkets.filter((market) =>
         market.inferredAsset === asset
@@ -194,6 +221,7 @@ export function createPolymarketService({
         && market.spreadPct <= maxSpreadPct
         && market.classification.type !== 'unknown',
       )
+      const pathMarkets = eligibleMarkets.filter((market) => market.classification.type === 'path')
 
       const distribution = buildDistributionFromMarkets(eligibleMarkets)
       const summary = summarizeDistribution(distribution, spotPrice)
@@ -211,6 +239,7 @@ export function createPolymarketService({
         },
         sourceMarkets,
         eligibleMarkets,
+        pathMarkets,
       }
     },
   }

@@ -38,6 +38,16 @@ test('classifyPolymarketMarket detects path markets', () => {
   assert.equal(result.confidence, 'high')
 })
 
+test('classifyPolymarketMarket detects reach phrasing as a path market', () => {
+  const result = classifyPolymarketMarket({
+    question: 'Will Bitcoin reach $120,000 by December 31, 2026?',
+  })
+
+  assert.equal(result.type, 'path')
+  assert.equal(result.barrier, 120000)
+  assert.equal(result.confidence, 'high')
+})
+
 test('classifyPolymarketMarket rejects ambiguous titles', () => {
   const result = classifyPolymarketMarket({
     question: 'How high will BTC go this week?',

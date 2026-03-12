@@ -338,3 +338,207 @@ test('createPolymarketService keeps only active non-closed markets from the near
   assert.equal(result.eligibleMarkets.length, 2)
   assert.deepEqual(result.sourceMarkets.map((market) => market.id), ['cur-1', 'cur-2'])
 })
+
+test('createPolymarketService prefers the richer event set when multiple active events share the same end date', async () => {
+  const service = createPolymarketService({
+    client: {
+      searchGamma: async () => ({
+        events: [
+          {
+            slug: 'btc-daily-thin',
+            title: 'Bitcoin daily thin',
+            active: true,
+            closed: false,
+            endDate: '2026-03-12T16:00:00Z',
+            tags: [{ slug: 'bitcoin' }, { slug: 'daily' }],
+            markets: [
+              {
+                id: 'thin-1',
+                conditionId: '0xthin1',
+                question: 'Bitcoin Up or Down on March 12?',
+                volumeNum: 200000,
+                spread: 0.01,
+                lastTradePrice: 0.5,
+                active: true,
+                closed: false,
+                clobTokenIds: '[\"801\",\"802\"]',
+              },
+            ],
+          },
+          {
+            slug: 'btc-daily-rich',
+            title: 'Bitcoin daily rich',
+            active: true,
+            closed: false,
+            endDate: '2026-03-12T16:00:00Z',
+            tags: [{ slug: 'bitcoin' }, { slug: 'daily' }, { slug: 'hit-price' }],
+            markets: [
+              {
+                id: 'rich-1',
+                conditionId: '0xrich1',
+                question: 'Will Bitcoin reach $75,000 on March 12?',
+                volumeNum: 120000,
+                spread: 0.02,
+                lastTradePrice: 0.35,
+                active: true,
+                closed: false,
+                clobTokenIds: '[\"803\",\"804\"]',
+              },
+              {
+                id: 'rich-2',
+                conditionId: '0xrich2',
+                question: 'Will Bitcoin reach $76,000 on March 12?',
+                volumeNum: 110000,
+                spread: 0.02,
+                lastTradePrice: 0.25,
+                active: true,
+                closed: false,
+                clobTokenIds: '[\"805\",\"806\"]',
+              },
+            ],
+          },
+        ],
+      }),
+      getClobPrices: async () => ({}),
+      getOpenInterest: async () => ([{ value: 10000 }]),
+    },
+  })
+
+  const result = await service.getAnalysis({ asset: 'BTC', horizon: 'daily', spotPrice: 81000 })
+
+  assert.deepEqual(result.sourceMarkets.map((market) => market.id), ['rich-1', 'rich-2'])
+  assert.equal(result.pathMarkets.length, 2)
+})
+
+test('createPolymarketService prefers classifiable markets over unknown daily event shapes on the same date', async () => {
+  const service = createPolymarketService({
+    client: {
+      searchGamma: async () => ({
+        events: [
+          {
+            slug: 'btc-daily-updown',
+            title: 'Bitcoin daily updown',
+            active: true,
+            closed: false,
+            endDate: '2026-03-12T16:00:00Z',
+            tags: [{ slug: 'bitcoin' }, { slug: 'daily' }],
+            markets: [
+              {
+                id: 'updown-1',
+                conditionId: '0xupdown1',
+                question: 'Bitcoin Up or Down on March 12?',
+                volumeNum: 200000,
+                spread: 0.01,
+                lastTradePrice: 0.5,
+                active: true,
+                closed: false,
+                clobTokenIds: '[\"901\",\"902\"]',
+              },
+            ],
+          },
+          {
+            slug: 'btc-daily-hit',
+            title: 'Bitcoin daily hit',
+            active: true,
+            closed: false,
+            endDate: '2026-03-12T16:00:00Z',
+            tags: [{ slug: 'bitcoin' }, { slug: 'daily' }, { slug: 'hit-price' }],
+            markets: [
+              {
+                id: 'hit-1',
+                conditionId: '0xhit1',
+                question: 'Will Bitcoin reach $75,000 on March 12?',
+                volumeNum: 150000,
+                spread: 0.02,
+                lastTradePrice: 0.35,
+                active: true,
+                closed: false,
+                clobTokenIds: '[\"903\",\"904\"]',
+              },
+            ],
+          },
+        ],
+      }),
+      getClobPrices: async () => ({}),
+      getOpenInterest: async () => ([{ value: 10000 }]),
+    },
+  })
+
+  const result = await service.getAnalysis({ asset: 'BTC', horizon: 'daily', spotPrice: 81000 })
+
+  assert.deepEqual(result.sourceMarkets.map((market) => market.id), ['hit-1'])
+  assert.equal(result.pathMarkets.length, 1)
+})
+
+test('createPolymarketService uses horizon-specific search queries', async () => {
+  const seen = []
+  const service = createPolymarketService({
+    now: () => Date.parse('2026-03-12T10:00:00Z'),
+    client: {
+      searchGamma: async (query) => {
+        seen.push(query)
+        return { events: [] }
+      },
+      getClobPrices: async () => ({}),
+      getOpenInterest: async () => ([]),
+    },
+  })
+
+  await service.getAnalysis({ asset: 'BTC', horizon: 'daily', spotPrice: 81000 })
+  await service.getAnalysis({ asset: 'BTC', horizon: 'weekly', spotPrice: 81000 })
+  await service.getAnalysis({ asset: 'BTC', horizon: 'monthly', spotPrice: 81000 })
+  await service.getAnalysis({ asset: 'BTC', horizon: 'yearly', spotPrice: 81000 })
+
+  assert.deepEqual(seen, ['bitcoin on march 12', 'bitcoin weekly', 'bitcoin monthly', 'bitcoin yearly'])
+})
+
+test('createPolymarketService keeps path markets as volatility stress inputs when no terminal distribution exists', async () => {
+  const service = createPolymarketService({
+    client: {
+      searchGamma: async () => ({
+        events: [{
+          slug: 'btc-monthly',
+          title: 'Bitcoin monthly',
+          active: true,
+          closed: false,
+          endDate: '2026-03-31T16:00:00Z',
+          tags: [{ slug: 'bitcoin' }, { slug: 'monthly' }],
+          markets: [
+            {
+              id: 'path-1',
+              slug: 'btc-hit-90k',
+              conditionId: '0xpath1',
+              question: 'Will Bitcoin reach $90,000 in March?',
+              volumeNum: 300000,
+              spread: 0.02,
+              lastTradePrice: 0.35,
+              active: true,
+              closed: false,
+              clobTokenIds: '[\"701\",\"702\"]',
+            },
+            {
+              id: 'path-2',
+              slug: 'btc-hit-100k',
+              conditionId: '0xpath2',
+              question: 'Will Bitcoin reach $100,000 in March?',
+              volumeNum: 240000,
+              spread: 0.03,
+              lastTradePrice: 0.18,
+              active: true,
+              closed: false,
+              clobTokenIds: '[\"703\",\"704\"]',
+            },
+          ],
+        }],
+      }),
+      getClobPrices: async () => ({}),
+      getOpenInterest: async () => ([{ value: 50000 }]),
+    },
+  })
+
+  const result = await service.getAnalysis({ asset: 'BTC', horizon: 'monthly', spotPrice: 81000 })
+
+  assert.equal(result.distribution.source, 'none')
+  assert.equal(result.pathMarkets.length, 2)
+  assert.equal(result.pathMarkets[0].classification.type, 'path')
+})

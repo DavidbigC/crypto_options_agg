@@ -55,4 +55,5 @@ export type PolysisResponse = {
     change7d: number | null
   }
   sourceMarkets: PolysisSourceMarket[]
+  pathMarkets?: PolysisSourceMarket[]
 }

@@ -53,7 +53,7 @@ export function classifyPolymarketMarket(market = {}) {
     }
   }
 
-  const pathMatch = question.match(/\b(?:hit|touch)\s+\$?\s*([\d,.]+k?)/i)
+  const pathMatch = question.match(/\b(?:hit|touch|reach)\s+\$?\s*([\d,.]+k?)/i)
   if (pathMatch) {
     const barrier = parseDollarNumber(pathMatch[1])
     if (barrier !== null) {

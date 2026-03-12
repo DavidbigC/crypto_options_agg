@@ -105,6 +105,7 @@ export default function PolysisPage() {
 
   const topProbability = distributionRows.reduce((max, row) => Math.max(max, row.probability), 0)
   const sourceMarkets = payload?.sourceMarkets ?? []
+  const pathMarkets = payload?.pathMarkets ?? []
   const eligibleCount = payload?.confidence?.marketCount ?? sourceMarkets.length
 
   return (
@@ -231,13 +232,27 @@ export default function PolysisPage() {
               </div>
             </div>
 
+            {pathMarkets.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-200">
+                <div className="font-semibold">Path-Based Volatility Signal</div>
+                <div className="mt-1 text-xs text-amber-800/80 dark:text-amber-300/80">
+                  This horizon is currently dominated by barrier-style “reach / dip” markets rather than a clean terminal price ladder.
+                  Those markets are shown below as volatility-stress signals instead of being forced into an implied close distribution.
+                </div>
+              </div>
+            )}
+
             <div className="rounded-xl border border-rim bg-card">
               <div className="border-b border-rim px-4 py-3">
                 <h3 className="text-sm font-semibold text-ink">Distribution Ladder</h3>
               </div>
               <div className="divide-y divide-rim">
                 {!distributionRows.length && (
-                  <div className="px-4 py-6 text-sm text-ink-3">No qualifying Polymarket bins available for this view yet.</div>
+                  <div className="px-4 py-6 text-sm text-ink-3">
+                    {pathMarkets.length
+                      ? 'No terminal close ladder is available for this horizon. Use the path-based volatility signals below.'
+                      : 'No qualifying Polymarket bins available for this view yet.'}
+                  </div>
                 )}
 
                 {distributionRows.map((row) => (
@@ -280,8 +295,35 @@ export default function PolysisPage() {
                   <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Distribution Source</div>
                   <div className="mt-2 text-lg font-semibold capitalize text-ink">{payload?.distribution?.source ?? 'N/A'}</div>
                 </div>
+                <div className="rounded-lg border border-rim bg-muted/40 p-3">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Path Markets</div>
+                  <div className="mt-2 text-lg font-semibold text-ink">{pathMarkets.length}</div>
+                </div>
               </div>
             </section>
+
+            {pathMarkets.length > 0 && (
+              <section className="card">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-ink">Volatility Stress Ladder</h2>
+                    <p className="mt-1 text-xs text-ink-3">Barrier-style markets that signal reach / dip probabilities.</p>
+                  </div>
+                  <div className="text-xs text-ink-3">{pathMarkets.length} active</div>
+                </div>
+
+                <div className="mt-4 space-y-2">
+                  {pathMarkets.slice(0, 8).map((market) => (
+                    <div key={market.id} className="rounded-lg border border-rim bg-muted/30 px-3 py-2">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <div className="font-medium text-ink">{market.question}</div>
+                        <div className="text-ink-2">{formatPercent((market.lastTradePrice ?? 0) * 100)}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             <section className="card">
               <div className="flex items-start justify-between gap-3">
