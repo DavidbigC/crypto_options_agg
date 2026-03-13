@@ -54,6 +54,7 @@ async fn main() {
         .route("/api/futures/:coin", get(routes::futures::futures_chain))
         .route("/api/analysis/:exchange/:coin", get(routes::analysis::handler))
         .route("/api/arbs/:coin", get(routes::arbs::handler))
+        .route("/api/scanners/:exchange/:coin", get(routes::scanners::handler))
         .route("/api/stream/:exchange/:coin", get(routes::stream::handler))
         .layer(cors)
         .with_state(state);

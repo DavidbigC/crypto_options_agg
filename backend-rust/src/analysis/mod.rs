@@ -1,5 +1,6 @@
 pub mod svi;
 pub mod arbs;
+pub mod scanners;
 
 use serde_json::{json, Value};
 
