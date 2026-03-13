@@ -202,12 +202,11 @@ fn compute_raw_surface(expirations: &[String], response: &Value, spot: f64, now_
         let dte = (t * 365.25).round() as i64;
         let label = date_label(exp);
 
-        // Map: bucket_key_i64 → (iv_sum, count, min_strike, max_strike, option_types)
-        let mut bucket_map: std::collections::HashMap<i64, (f64, usize, f64, f64, Vec<String>)> =
-            centers.iter().map(|&c| ((c * 1e4).round() as i64, (0.0, 0, f64::INFINITY, f64::NEG_INFINITY, vec![]))).collect();
+        // Map: bucket_key_i64 → (iv_sum, count, min_strike, max_strike, has_call, has_put)
+        let mut bucket_map: std::collections::HashMap<i64, (f64, usize, f64, f64, bool, bool)> =
+            centers.iter().map(|&c| ((c * 1e4).round() as i64, (0.0, 0, f64::INFINITY, f64::NEG_INFINITY, false, false))).collect();
 
-        let empty = vec![];
-        for c in chain["calls"].as_array().unwrap_or(&empty) {
+        for c in chain["calls"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
             let strike = c["strike"].as_f64().unwrap_or(0.0);
             let mv = c["markVol"].as_f64().unwrap_or(0.0);
             if strike < spot || mv <= 0.0 { continue; }
@@ -217,15 +216,13 @@ fn compute_raw_surface(expirations: &[String], response: &Value, spot: f64, now_
                 .map(|&c| (c * 1e4).round() as i64)
                 .unwrap();
             if let Some(e) = bucket_map.get_mut(&nearest_key) {
-                e.0 += mv * 100.0;
-                e.1 += 1;
-                e.2 = e.2.min(strike);
-                e.3 = e.3.max(strike);
-                if !e.4.contains(&"call".to_string()) { e.4.push("call".to_string()); }
+                e.0 += mv * 100.0; e.1 += 1;
+                e.2 = e.2.min(strike); e.3 = e.3.max(strike);
+                e.4 = true;
             }
         }
 
-        for p in chain["puts"].as_array().unwrap_or(&empty) {
+        for p in chain["puts"].as_array().map(|a| a.as_slice()).unwrap_or(&[]) {
             let strike = p["strike"].as_f64().unwrap_or(0.0);
             let mv = p["markVol"].as_f64().unwrap_or(0.0);
             if strike > spot || mv <= 0.0 { continue; }
@@ -235,22 +232,22 @@ fn compute_raw_surface(expirations: &[String], response: &Value, spot: f64, now_
                 .map(|&c| (c * 1e4).round() as i64)
                 .unwrap();
             if let Some(e) = bucket_map.get_mut(&nearest_key) {
-                e.0 += mv * 100.0;
-                e.1 += 1;
-                e.2 = e.2.min(strike);
-                e.3 = e.3.max(strike);
-                if !e.4.contains(&"put".to_string()) { e.4.push("put".to_string()); }
+                e.0 += mv * 100.0; e.1 += 1;
+                e.2 = e.2.min(strike); e.3 = e.3.max(strike);
+                e.5 = true;
             }
         }
 
         let mut cell_count = 0;
-        for (&center_key, (iv_sum, count, min_s, max_s, opt_types)) in &bucket_map {
-            if *count == 0 { continue; }
+        for (&center_key, &(iv_sum, count, min_s, max_s, has_call, has_put)) in &bucket_map {
+            if count == 0 { continue; }
             let center = center_key as f64 / 1e4;
             let bucket_label = labels.iter().zip(centers.iter())
                 .find(|(_, &c)| ((c * 1e4).round() as i64) == center_key)
                 .map(|(l, _)| l.as_str())
                 .unwrap_or("");
+            let opt_types: Vec<&str> = [("call", has_call), ("put", has_put)]
+                .iter().filter(|(_, v)| *v).map(|(s, _)| *s).collect();
             cell_count += 1;
             cells.push(json!({
                 "exp":          exp,
@@ -259,7 +256,7 @@ fn compute_raw_surface(expirations: &[String], response: &Value, spot: f64, now_
                 "bucketKey":    center,
                 "bucketLabel":  bucket_label,
                 "moneynessPct": ((center.exp() - 1.0) * 100.0 * 10.0).round() / 10.0,
-                "avgMarkIV":    ((iv_sum / *count as f64) * 10.0).round() / 10.0,
+                "avgMarkIV":    ((iv_sum / count as f64) * 10.0).round() / 10.0,
                 "count":        count,
                 "minStrike":    min_s,
                 "maxStrike":    max_s,
@@ -298,14 +295,15 @@ pub fn compute_analysis(response: &Value, spot: f64) -> Option<Value> {
 
     let raw_surface = compute_raw_surface(&expirations, response, spot, now_ms);
 
-    // SVI fits
-    let mut svi_fits = serde_json::Map::new();
+    // SVI fits: keep native structs for internal use, convert to JSON only at end
+    let mut fits_internal: std::collections::HashMap<String, Option<svi::SviFitResult>> =
+        std::collections::HashMap::new();
     for exp in &expirations {
         let chain = &response["data"][exp];
         let calls = chain["calls"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
         let puts  = chain["puts"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
         if calls.is_empty() || puts.is_empty() {
-            svi_fits.insert(exp.clone(), Value::Null);
+            fits_internal.insert(exp.clone(), None);
             continue;
         }
 
@@ -330,11 +328,10 @@ pub fn compute_analysis(response: &Value, spot: f64) -> Option<Value> {
             w_obs.push(mv * mv * t);
         }
 
-        let fit = svi::fit_svi(&ks, &w_obs, t);
-        svi_fits.insert(exp.clone(), fit.map(|f| f.to_json()).unwrap_or(Value::Null));
+        fits_internal.insert(exp.clone(), svi::fit_svi(&ks, &w_obs, t));
     }
 
-    // Term structure
+    // Term structure (uses native SviFitResult directly — no JSON round-trip)
     let mut term_structure: Vec<Value> = Vec::new();
     for exp in &expirations {
         let expiry_ms = date_to_ms(exp);
@@ -342,26 +339,18 @@ pub fn compute_analysis(response: &Value, spot: f64) -> Option<Value> {
         let dte = (t * 365.25).round() as i64;
         let label = date_label(exp);
 
-        let atm_iv: Option<f64> = if let Some(fit_val) = svi_fits.get(exp) {
-            if !fit_val.is_null() {
-                let params = svi::SviParams {
-                    a:     fit_val["params"]["a"].as_f64().unwrap_or(0.0),
-                    b:     fit_val["params"]["b"].as_f64().unwrap_or(0.0),
-                    rho:   fit_val["params"]["rho"].as_f64().unwrap_or(0.0),
-                    m:     fit_val["params"]["m"].as_f64().unwrap_or(0.0),
-                    sigma: fit_val["params"]["sigma"].as_f64().unwrap_or(1e-6),
-                };
-                let iv = svi::svi_iv(0.0, t, &params);
+        let atm_iv: Option<f64> = match fits_internal.get(exp).and_then(|f| f.as_ref()) {
+            Some(fit) => {
+                let iv = svi::svi_iv(0.0, t, &fit.params);
                 Some((iv * 1000.0).round() / 10.0)
-            } else {
+            }
+            None => {
                 // Fallback: closest-to-ATM contract
                 let chain = &response["data"][exp];
-                let empty = vec![];
-                let all: Vec<&Value> = chain["calls"].as_array().unwrap_or(&empty).iter()
-                    .chain(chain["puts"].as_array().unwrap_or(&empty).iter())
-                    .collect();
-                all.into_iter()
-                    .filter(|c| c["strike"].as_f64().is_some() && c["markVol"].as_f64().map(|v| v > 0.0).unwrap_or(false))
+                let calls = chain["calls"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+                let puts  = chain["puts"].as_array().map(|a| a.as_slice()).unwrap_or(&[]);
+                calls.iter().chain(puts.iter())
+                    .filter(|c| c["markVol"].as_f64().map(|v| v > 0.0).unwrap_or(false))
                     .min_by(|a, b| {
                         let da = (a["strike"].as_f64().unwrap_or(0.0) - spot).abs();
                         let db = (b["strike"].as_f64().unwrap_or(0.0) - spot).abs();
@@ -370,7 +359,7 @@ pub fn compute_analysis(response: &Value, spot: f64) -> Option<Value> {
                     .and_then(|c| c["markVol"].as_f64())
                     .map(|mv| (mv * 1000.0).round() / 10.0)
             }
-        } else { None };
+        };
 
         if let Some(iv) = atm_iv {
             term_structure.push(json!({ "label": label, "dte": dte, "atmIV": iv, "exp": exp }));
@@ -424,6 +413,17 @@ pub fn compute_analysis(response: &Value, spot: f64) -> Option<Value> {
     }
 
     let atm_bbo_spread = compute_atm_bbo_spread(&expirations, response, spot);
+
+    // Build svi_fits JSON from native structs (single serialization, no round-trip)
+    let svi_fits: serde_json::Map<String, Value> = expirations.iter()
+        .map(|exp| {
+            let v = fits_internal.get(exp)
+                .and_then(|f| f.as_ref())
+                .map(|f| f.to_json())
+                .unwrap_or(Value::Null);
+            (exp.clone(), v)
+        })
+        .collect();
 
     Some(json!({
         "sviFits":      svi_fits,
