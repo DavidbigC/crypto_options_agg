@@ -1,4 +1,5 @@
 use crate::cache::*;
+use crate::sse::SseSenders;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -28,10 +29,7 @@ pub struct AppState {
     pub scanners:        Arc<RwLock<ScannerCache>>,
 
     // SSE broadcast channels: key = "exchange:coin" (e.g., "bybit:BTC")
-    pub sse_senders: Arc<RwLock<std::collections::HashMap<
-        String,
-        tokio::sync::broadcast::Sender<String>,
-    >>>,
+    pub sse_senders: SseSenders,
 }
 
 impl AppState {
