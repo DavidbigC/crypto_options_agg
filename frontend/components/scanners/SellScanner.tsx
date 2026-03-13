@@ -57,7 +57,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
       if (!chain) continue
       const expiryTs = new Date(expiry + 'T08:00:00Z').getTime()
       const dte = (expiryTs - now) / 86_400_000
-      if (dte <= 0) continue
+      if (dte < 0.5) continue
 
       const processContracts = (contracts: any[], type: 'call' | 'put') => {
         if (optionType === 'calls' && type === 'put') return
@@ -81,6 +81,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
 
         const bid = getBestBid(contract, activeExchanges)
         if (!bid || bid <= 0) return
+        if (!contract.markVol) return
 
         const collateral = type === 'call' ? spotPrice : contract.strike
         const apr = (bid / collateral) * (365 / dte) * 100
@@ -111,6 +112,14 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
     return (
       <div className="card py-6 text-center text-sm text-ink-3">
         No data available.
+      </div>
+    )
+  }
+
+  if (!spotPrice || spotPrice <= 0) {
+    return (
+      <div className="card py-6 text-center text-sm text-ink-3">
+        Waiting for spot price…
       </div>
     )
   }
