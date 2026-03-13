@@ -5,11 +5,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
-use tokio::net::TcpStream;
-use futures_util::stream::SplitSink;
-
-type WsSink = SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>;
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const FAMILIES: &[&str] = &["BTC-USD", "ETH-USD"];
 const WS_URL: &str = "wss://ws.okx.com:8443/ws/v5/public";
@@ -50,6 +46,7 @@ fn start_ws(state: Arc<AppState>) {
             match run_ws(state.clone()).await {
                 Ok(_) => {
                     tracing::warn!("OKX WS closed cleanly, reconnecting in {}s", backoff);
+                    backoff = 2;
                 }
                 Err(e) => {
                     tracing::error!("OKX WS error: {}, reconnecting in {}s", e, backoff);
@@ -165,15 +162,13 @@ async fn poll_tickers(state: Arc<AppState>, client: reqwest::Client, family: Str
                     }
 
                     // Build and broadcast SSE
-                    let (greeks_snap, ticker_snap, spot_snap) = {
-                        let g = state.okx_greeks.read().await;
-                        let t = state.okx_ticker.read().await;
-                        let s = state.okx_spot.read().await;
-                        (g.clone(), t.clone(), s.clone())
+                    let payload = {
+                        let greeks = state.okx_greeks.read().await;
+                        let ticker = state.okx_ticker.read().await;
+                        let spot = state.okx_spot.read().await;
+                        build_response(&greeks, &ticker, &spot, &family)
                     };
-                    let data = build_response(&greeks_snap, &ticker_snap, &spot_snap, &family);
-                    if !data.is_null() {
-                        let payload = json!({ "tickers": data["data"], "spotPrice": data["spotPrice"] });
+                    if !payload.is_null() {
                         let key = format!("okx:{}", family);
                         crate::sse::broadcast(&state.sse_senders, &key, payload.to_string()).await;
                     }

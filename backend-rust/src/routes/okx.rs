@@ -24,13 +24,12 @@ pub async fn options_chain(
         ));
     }
 
-    let greeks = state.okx_greeks.read().await;
-    let ticker = state.okx_ticker.read().await;
-    let spot = state.okx_spot.read().await;
-    let data = build_response(&greeks, &ticker, &spot, &family);
-    drop(greeks);
-    drop(ticker);
-    drop(spot);
+    let data = {
+        let greeks = state.okx_greeks.read().await;
+        let ticker = state.okx_ticker.read().await;
+        let spot = state.okx_spot.read().await;
+        build_response(&greeks, &ticker, &spot, &family)
+    };
 
     if data.is_null() {
         return Err((
