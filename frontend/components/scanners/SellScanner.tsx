@@ -70,7 +70,12 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
 
         let contract: any
         if (targetStrike) {
-          contract = otm.reduce((best, c) =>
+          // For calls: pick nearest strike >= targetStrike; for puts: nearest strike <= targetStrike
+          const qualified = type === 'call'
+            ? otm.filter(c => c.strike >= targetStrike)
+            : otm.filter(c => c.strike <= targetStrike)
+          const pool = qualified.length ? qualified : otm
+          contract = pool.reduce((best, c) =>
             Math.abs(c.strike - targetStrike) < Math.abs(best.strike - targetStrike) ? c : best
           )
         } else {
