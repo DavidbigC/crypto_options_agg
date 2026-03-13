@@ -35,7 +35,7 @@ pub fn start(state: Arc<AppState>, client: reqwest::Client) {
     }
 
     // Start WebSocket for Greeks
-    start_ws(state.clone());
+    start_ws(state.clone(), client.clone());
 
     tracing::info!("Deribit REST polling + WS started");
 }
@@ -137,26 +137,27 @@ async fn poll_once(
     Ok(())
 }
 
-fn start_ws(state: Arc<AppState>) {
+fn start_ws(state: Arc<AppState>, client: reqwest::Client) {
     tokio::spawn(async move {
         let mut backoff = 2u64;
         loop {
-            match run_ws(state.clone()).await {
+            match run_ws(&state, &client).await {
                 Ok(_) => {
-                    tracing::warn!("Deribit WS closed cleanly, reconnecting in {}s", backoff);
+                    tracing::info!("Deribit WS closed cleanly, reconnecting in 2s");
+                    sleep(Duration::from_secs(2)).await;
                     backoff = 2;
                 }
                 Err(e) => {
-                    tracing::error!("Deribit WS error: {}, reconnecting in {}s", e, backoff);
+                    tracing::warn!("Deribit WS error: {}, reconnecting in {}s", e, backoff);
+                    sleep(Duration::from_secs(backoff)).await;
+                    backoff = (backoff * 2).min(60);
                 }
             }
-            sleep(Duration::from_secs(backoff)).await;
-            backoff = (backoff * 2).min(60);
         }
     });
 }
 
-async fn run_ws(state: Arc<AppState>) -> Result<()> {
+async fn run_ws(state: &AppState, client: &reqwest::Client) -> Result<()> {
     let (ws_stream, _) = connect_async(WS_URL).await?;
     tracing::info!("Deribit WS connected");
 
@@ -164,12 +165,8 @@ async fn run_ws(state: Arc<AppState>) -> Result<()> {
     let write = Arc::new(tokio::sync::Mutex::new(write));
 
     // Fetch instruments and subscribe in chunks of 200
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()?;
-
     let mut all_channels: Vec<String> = Vec::new();
-    for &(_, currency, _, _) in COINS.iter() {
+    for &(_, currency, _, prefix_filter) in COINS.iter() {
         let url = format!(
             "{}/public/get_instruments?currency={}&kind=option&expired=false",
             DERIBIT_BASE, currency
@@ -182,13 +179,20 @@ async fn run_ws(state: Arc<AppState>) -> Result<()> {
         {
             Ok(resp) => {
                 if let Ok(body) = resp.json::<Value>().await {
-                    if let Some(instruments) = body["result"].as_array() {
-                        for inst in instruments {
-                            if let Some(name) = inst["instrument_name"].as_str() {
-                                all_channels
-                                    .push(format!("ticker.{}.100ms", name));
-                            }
-                        }
+                    let mut instruments: Vec<String> = body["result"]
+                        .as_array()
+                        .map(|arr| arr.iter()
+                            .filter_map(|i| i["instrument_name"].as_str().map(String::from))
+                            .collect())
+                        .unwrap_or_default();
+
+                    // Apply prefix filter (important for SOL_USDC: only subscribe to SOL options, not all USDC)
+                    if let Some(prefix) = prefix_filter {
+                        instruments.retain(|name| name.starts_with(prefix));
+                    }
+
+                    for name in instruments {
+                        all_channels.push(format!("ticker.{}.100ms", name));
                     }
                 }
             }
@@ -236,7 +240,7 @@ async fn run_ws(state: Arc<AppState>) -> Result<()> {
         match msg {
             Message::Text(text) => {
                 if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
-                    handle_ws_message(&state, &parsed).await;
+                    handle_ws_message(state, &parsed).await;
                 }
             }
             Message::Ping(data) => {
