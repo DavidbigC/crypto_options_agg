@@ -49,3 +49,9 @@ pub type ScannerCache = HashMap<String, serde_json::Value>;
 // ---- Derive viewer count (demand-driven WS) ----
 // currency -> number of active SSE viewers
 pub type DeriveViewerCount = HashMap<String, usize>;
+
+// ---- Polymarket ----
+pub type PolymarketPriceCache     = HashMap<String, f64>;
+pub type PolymarketDiscoveryCache = HashMap<String, (Vec<serde_json::Value>, std::time::Instant)>;
+pub type PolymarketOiCache        = HashMap<String, (f64, std::time::Instant)>;
+pub type PolymarketTokenAssetMap  = HashMap<String, Vec<String>>;

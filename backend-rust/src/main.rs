@@ -34,6 +34,14 @@ async fn main() {
     exchanges::binance::start(state.clone());
     exchanges::derive::start(state.clone(), http_client.clone());
     exchanges::futures::start_polling(state.clone(), http_client.clone());
+    exchanges::polymarket::start_ws(
+        state.polymarket_prices.clone(),
+        state.sse_senders.clone(),
+        state.polymarket_token_asset.clone(),
+        http_client.clone(),
+        state.polymarket_discovery.clone(),
+        state.polymarket_oi.clone(),
+    );
 
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
 
@@ -55,6 +63,9 @@ async fn main() {
         .route("/api/analysis/:exchange/:coin", get(routes::analysis::handler))
         .route("/api/arbs/:coin", get(routes::arbs::handler))
         .route("/api/scanners/:exchange/:coin", get(routes::scanners::handler))
+        .route("/api/polymarket/surface/:asset", get(routes::polymarket::surface))
+        .route("/api/polymarket/:asset/:horizon", get(routes::polymarket::analysis))
+        .route("/api/stream/polymarket/:asset", get(routes::polymarket::stream))
         .route("/api/stream/:exchange/:coin", get(routes::stream::handler))
         .route("/api/debug/bybit", get(routes::bybit::debug_bybit))
         .layer(cors)

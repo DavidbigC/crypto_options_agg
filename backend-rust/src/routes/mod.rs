@@ -10,3 +10,4 @@ pub mod futures;
 pub mod analysis;
 pub mod arbs;
 pub mod scanners;
+pub mod polymarket;

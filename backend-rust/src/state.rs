@@ -1,9 +1,9 @@
 use crate::cache::*;
 use crate::sse::SseSenders;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-#[derive(Default)]
 pub struct AppState {
     pub bybit_ticker:    Arc<RwLock<BybitTickerCache>>,
     pub bybit_spot:      Arc<RwLock<BybitSpotCache>>,
@@ -30,10 +30,45 @@ pub struct AppState {
 
     // SSE broadcast channels: key = "exchange:coin" (e.g., "bybit:BTC")
     pub sse_senders: SseSenders,
+
+    // Polymarket
+    pub polymarket_prices:      Arc<RwLock<PolymarketPriceCache>>,
+    pub polymarket_discovery:   Arc<RwLock<PolymarketDiscoveryCache>>,
+    pub polymarket_oi:          Arc<RwLock<PolymarketOiCache>>,
+    pub polymarket_token_asset: Arc<RwLock<PolymarketTokenAssetMap>>,
+
+    // Shared HTTP client for route handlers
+    pub http_client: reqwest::Client,
 }
 
 impl AppState {
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            bybit_ticker:    Arc::new(RwLock::new(HashMap::new())),
+            bybit_spot:      Arc::new(RwLock::new(HashMap::new())),
+            okx_greeks:      Arc::new(RwLock::new(HashMap::new())),
+            okx_ticker:      Arc::new(RwLock::new(HashMap::new())),
+            okx_spot:        Arc::new(RwLock::new(HashMap::new())),
+            deribit:         Arc::new(RwLock::new(HashMap::new())),
+            deribit_greeks:  Arc::new(RwLock::new(HashMap::new())),
+            derive_tickers:  Arc::new(RwLock::new(HashMap::new())),
+            derive_spot:     Arc::new(RwLock::new(HashMap::new())),
+            derive_viewers:  Arc::new(RwLock::new(HashMap::new())),
+            binance:         Arc::new(RwLock::new(HashMap::new())),
+            binance_spot:    Arc::new(RwLock::new(HashMap::new())),
+            futures:         Arc::new(RwLock::new(HashMap::new())),
+            analysis:        Arc::new(RwLock::new(HashMap::new())),
+            arbs:            Arc::new(RwLock::new(HashMap::new())),
+            scanners:        Arc::new(RwLock::new(HashMap::new())),
+            sse_senders:     Arc::new(RwLock::new(HashMap::new())),
+            polymarket_prices:      Arc::new(RwLock::new(HashMap::new())),
+            polymarket_discovery:   Arc::new(RwLock::new(HashMap::new())),
+            polymarket_oi:          Arc::new(RwLock::new(HashMap::new())),
+            polymarket_token_asset: Arc::new(RwLock::new(HashMap::new())),
+            http_client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .unwrap(),
+        }
     }
 }
