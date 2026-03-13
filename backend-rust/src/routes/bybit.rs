@@ -1,12 +1,13 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use crate::exchanges::bybit::{build_response, time_to_expiration_days};
+use crate::exchanges::bybit::{build_response, parse_symbol, time_to_expiration_days};
 use crate::state::AppState;
 
 pub async fn options_chain(
@@ -146,6 +147,75 @@ pub async fn spot_single(
         .and_then(|c| spot_cache.get(c).copied())
         .unwrap_or(0.0);
     Json(json!({ "symbol": symbol, "price": price }))
+}
+
+#[derive(Deserialize, Default)]
+pub struct DebugBybitQuery {
+    pub coin: Option<String>,
+    pub expiry: Option<String>,
+}
+
+pub async fn debug_bybit(
+    Query(query): Query<DebugBybitQuery>,
+    State(state): State<Arc<AppState>>,
+) -> Json<Value> {
+    let coin = query.coin.as_deref().unwrap_or("BTC").to_uppercase();
+    let expiry = query.expiry.as_deref();
+
+    let ticker_cache = state.bybit_ticker.read().await;
+    let spot_cache   = state.bybit_spot.read().await;
+
+    let coin_cache = ticker_cache.get(&coin);
+    let symbols: Vec<&String> = coin_cache.map(|m| m.keys().collect()).unwrap_or_default();
+    let cache_symbols = symbols.len();
+
+    let spot = spot_cache.get(&coin).copied().unwrap_or(0.0);
+
+    // Collect unique expiry dates from symbol names
+    let mut expiries: Vec<String> = {
+        let mut set = std::collections::BTreeSet::new();
+        for s in &symbols {
+            if let Some(p) = parse_symbol(s) {
+                set.insert(p.expiry_date);
+            }
+        }
+        set.into_iter().collect()
+    };
+    expiries.sort();
+
+    // SSE receiver count for "bybit:{coin}"
+    let sse_key = format!("bybit:{}", coin);
+    let sse_count = {
+        let senders = state.sse_senders.read().await;
+        senders.get(&sse_key).map(|tx| tx.receiver_count()).unwrap_or(0)
+    };
+
+    let mut resp = json!({
+        "coin": coin,
+        "cacheSymbols": cache_symbols,
+        "spot": spot,
+        "expiriesInCache": expiries,
+        "sseClients": sse_count,
+        "sseClientExpiries": [],
+    });
+
+    if let Some(exp) = expiry {
+        let symbols_for_expiry: Vec<&String> = symbols.iter()
+            .copied()
+            .filter(|s| parse_symbol(s).map(|p| p.expiry_date == exp).unwrap_or(false))
+            .collect();
+        let sample_symbols: Vec<&String> = symbols_for_expiry.iter().copied().take(3).collect();
+        let sample_data: Vec<Value> = symbols_for_expiry.iter().take(2)
+            .filter_map(|s| coin_cache.and_then(|m| m.get(*s)).cloned())
+            .collect();
+        let resp_obj = resp.as_object_mut().unwrap();
+        resp_obj.insert("queryExpiry".into(), json!(exp));
+        resp_obj.insert("symbolsForExpiry".into(), json!(symbols_for_expiry.len()));
+        resp_obj.insert("sampleSymbols".into(), json!(sample_symbols));
+        resp_obj.insert("sampleData".into(), json!(sample_data));
+    }
+
+    Json(resp)
 }
 
 fn symbol_to_coin(symbol: &str) -> Option<&'static str> {
