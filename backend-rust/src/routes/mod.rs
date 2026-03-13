@@ -8,3 +8,4 @@ pub mod stream;
 pub mod combined;
 pub mod futures;
 pub mod analysis;
+pub mod arbs;
