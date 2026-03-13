@@ -31,6 +31,7 @@ async fn main() {
     exchanges::bybit::start_polling(state.clone(), http_client.clone());
     exchanges::okx::start(state.clone(), http_client.clone());
     exchanges::deribit::start(state.clone(), http_client.clone());
+    exchanges::binance::start(state.clone());
 
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
 
@@ -44,6 +45,7 @@ async fn main() {
         .route("/api/okx/spots", get(routes::okx::spots))
         .route("/api/okx/debug/:inst_family", get(routes::okx::debug))
         .route("/api/deribit/options/:coin", get(routes::deribit::options_chain))
+        .route("/api/binance/options/:coin", get(routes::binance::options_chain))
         .layer(cors)
         .with_state(state);
 
