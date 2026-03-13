@@ -9,6 +9,7 @@ import CombinedOptionsChain from '@/components/CombinedOptionsChain'
 import ArbPanel from '@/components/ArbPanel'
 import GammaScanner from '@/components/scanners/GammaScanner'
 import VegaScanner from '@/components/scanners/VegaScanner'
+import SellScanner from '@/components/scanners/SellScanner'
 import classNames from 'classnames'
 import { OptionsData, Exchange } from '@/types/options'
 import { apiPath, ssePath } from '@/lib/apiBase.js'
@@ -34,7 +35,7 @@ export default function HomePage() {
   const [activeExchanges, setActiveExchanges] = useState<Set<ExchangeKey>>(new Set(ALL_EXCHANGES))
   const [boxSpreads, setBoxSpreads] = useState<BoxSpread[]>([])
   const [allArbs, setAllArbs] = useState<ArbOpportunity[]>([])
-  const [activeScanner, setActiveScanner] = useState<'gamma' | 'vega' | null>(null)
+  const [activeScanner, setActiveScanner] = useState<'gamma' | 'vega' | 'sell' | null>(null)
   const fetchVersion = useRef(0)
   const selectedExpirationRef = useRef('')
 
@@ -222,6 +223,17 @@ export default function HomePage() {
             >
               V Scanner
             </button>
+            <button
+              onClick={() => setActiveScanner(v => v === 'sell' ? null : 'sell')}
+              className={classNames(
+                'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
+                activeScanner === 'sell'
+                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
+              )}
+            >
+              Sell
+            </button>
           </div>
         </div>
 
@@ -239,6 +251,17 @@ export default function HomePage() {
         <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${activeScanner === 'vega' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
           <div className="overflow-hidden">
             <VegaScanner
+              optionsData={optionsData}
+              spotPrice={spotPrice}
+              coin={selectedCrypto}
+              exchange={exchange}
+              activeExchanges={activeExchanges}
+            />
+          </div>
+        </div>
+        <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${activeScanner === 'sell' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+          <div className="overflow-hidden">
+            <SellScanner
               optionsData={optionsData}
               spotPrice={spotPrice}
               coin={selectedCrypto}
