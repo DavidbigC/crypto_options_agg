@@ -33,6 +33,7 @@ async fn main() {
     exchanges::deribit::start(state.clone(), http_client.clone());
     exchanges::binance::start(state.clone());
     exchanges::derive::start(state.clone(), http_client.clone());
+    exchanges::futures::start_polling(state.clone(), http_client.clone());
 
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
 
@@ -50,6 +51,7 @@ async fn main() {
         .route("/api/derive/options/:coin", get(routes::derive::options_chain))
         .route("/api/derive/debug/:coin", get(routes::derive::debug))
         .route("/api/combined/options/:base_coin", get(routes::combined::options_chain))
+        .route("/api/futures/:coin", get(routes::futures::futures_chain))
         .route("/api/stream/:exchange/:coin", get(routes::stream::handler))
         .layer(cors)
         .with_state(state);

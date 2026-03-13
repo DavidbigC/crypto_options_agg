@@ -6,3 +6,4 @@ pub mod binance;
 pub mod derive;
 pub mod stream;
 pub mod combined;
+pub mod futures;
