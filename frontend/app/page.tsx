@@ -228,7 +228,7 @@ export default function HomePage() {
               className={classNames(
                 'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
                 activeScanner === 'sell'
-                  ? 'bg-emerald-600 text-white border-emerald-600'
+                  ? 'bg-sky-600 text-white border-sky-600'
                   : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
               )}
             >
