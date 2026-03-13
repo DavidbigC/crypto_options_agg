@@ -1,6 +1,6 @@
 use axum::{
     extract::{Path, Query, State},
-    response::sse::{Event, KeepAlive, Sse},
+    response::sse::{Event, Sse},
 };
 use std::{sync::Arc, time::Duration};
 use futures_util::stream::Stream;
@@ -59,11 +59,7 @@ pub async fn handler(
         }
     };
 
-    Sse::new(stream).keep_alive(
-        KeepAlive::new()
-            .interval(Duration::from_secs(sse::HEARTBEAT_SECS))
-            .text("ping"),
-    )
+    Sse::new(stream)
 }
 
 /// Filter the tickers/data array in a JSON payload to only those matching
