@@ -37,9 +37,9 @@ fn get_bid(contract: &Value, active_exchanges: &[&str]) -> f64 {
             return best;
         }
     }
-    contract["bestBid"].as_f64().filter(|&v| v > 0.0)
-        .or_else(|| contract["bid"].as_f64())
-        .unwrap_or(0.0)
+    // Match JS: bestBid ?? bid (nullish coalescing — fallback only if null/missing, not if zero)
+    if let Some(v) = contract["bestBid"].as_f64() { return v; }
+    contract["bid"].as_f64().unwrap_or(0.0)
 }
 
 fn future_expirations(expirations: &[Value]) -> Vec<String> {
@@ -168,11 +168,8 @@ pub fn compute_gamma_rows(options_data: &Value, spot: f64, active_exchanges: &[&
 
         if let Some((row, _, _)) = best_long.as_ref() { results.push(row.clone()); }
         // Only push bestShort if it's a different strangle (different strike pair)
-        if let (Some((lr, _, lk)), Some((sr, _, sk))) = (&best_long, &best_short) {
-            if (lk - sk).abs() > 0.01 {
-                let _ = lr; // suppress unused warning
-                results.push(sr.clone());
-            }
+        if let (Some((_, _, lk)), Some((sr, _, sk))) = (&best_long, &best_short) {
+            if (lk - sk).abs() > 0.01 { results.push(sr.clone()); }
         }
     }
     results
