@@ -23,10 +23,21 @@ async fn main() {
     let cfg = config::Config::from_env();
     let state = Arc::new(state::AppState::new());
 
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    exchanges::bybit::start_polling(state.clone(), http_client.clone());
+
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
 
     let app = Router::new()
         .route("/api/health", get(routes::health::handler))
+        .route("/api/options/:base_coin", get(routes::bybit::options_chain))
+        .route("/api/options/:base_coin/:expiration", get(routes::bybit::options_chain_expiry))
+        .route("/api/spots", get(routes::bybit::spots))
+        .route("/api/spot/:symbol", get(routes::bybit::spot_single))
         .layer(cors)
         .with_state(state);
 
