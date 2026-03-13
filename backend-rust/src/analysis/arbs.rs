@@ -36,7 +36,7 @@ fn pick_hedge<'a>(options_expiry: &str, futures: &'a [Value], now_ms: i64) -> Op
     let mut best_dist = f64::INFINITY;
 
     for f in futures {
-        let is_perp = f["isPerp"].as_bool().unwrap_or(true);
+        let is_perp = f["isPerp"].as_bool().unwrap_or(false);
         let mark = f["markPrice"].as_f64().unwrap_or(0.0);
         if is_perp || mark <= 0.0 { continue; }
         let fexp = f["expiry"].as_str().unwrap_or("");
