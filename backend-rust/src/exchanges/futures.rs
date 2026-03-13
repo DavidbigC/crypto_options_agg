@@ -26,9 +26,19 @@ async fn refresh(state: &AppState, client: &reqwest::Client, coin: &str) {
         poll_deribit(client, coin),
     );
     let mut rows: Vec<serde_json::Value> = Vec::new();
-    if let Ok(r) = bybit_res { rows.extend(r); }
-    if let Ok(r) = okx_res   { rows.extend(r); }
-    if let Ok(r) = deribit_res { rows.extend(r); }
+    match bybit_res {
+        Ok(r)  => rows.extend(r),
+        Err(e) => tracing::warn!("futures bybit {coin}: {e}"),
+    }
+    match okx_res {
+        Ok(r)  => rows.extend(r),
+        Err(e) => tracing::warn!("futures okx {coin}: {e}"),
+    }
+    match deribit_res {
+        Ok(r)  => rows.extend(r),
+        Err(e) => tracing::warn!("futures deribit {coin}: {e}"),
+    }
+    if rows.is_empty() { return; }
     sort_futures(&mut rows);
     state.futures.write().await.insert(coin.to_string(), rows);
 }
@@ -68,9 +78,11 @@ fn ts_millis_to_date(ts_ms: i64) -> String {
 
 async fn poll_bybit(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<serde_json::Value>> {
     let url = format!("https://api.bybit.com/v5/market/tickers?category=inverse&baseCoin={coin}");
-    let json: serde_json::Value = client.get(&url).send().await?.json().await?;
+    let json: serde_json::Value = client.get(&url)
+        .header("User-Agent", "options-viewer/1.0")
+        .send().await?.json().await?;
     let list = json["result"]["list"].as_array().cloned().unwrap_or_default();
-    let mut items: Vec<serde_json::Value> = list.iter().map(|t| {
+    let items: Vec<serde_json::Value> = list.iter().map(|t| {
         let delivery = t["deliveryTime"].as_str().unwrap_or("0");
         let is_perp = delivery == "0";
         let expiry = if is_perp {
@@ -90,7 +102,6 @@ async fn poll_bybit(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<
             "lastPrice": t["lastPrice"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
         })
     }).collect();
-    sort_futures(&mut items);
     Ok(items)
 }
 
@@ -104,8 +115,10 @@ fn parse_okx_expiry(inst_id: &str) -> Option<String> {
 async fn poll_okx(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<serde_json::Value>> {
     let family = format!("{coin}-USD");
     let (fut_res, swap_res) = tokio::join!(
-        client.get(format!("https://www.okx.com/api/v5/market/tickers?instType=FUTURES&instFamily={family}")).send(),
-        client.get(format!("https://www.okx.com/api/v5/market/tickers?instType=SWAP&instFamily={family}")).send(),
+        client.get(format!("https://www.okx.com/api/v5/market/tickers?instType=FUTURES&instFamily={family}"))
+            .header("User-Agent", "options-viewer/1.0").send(),
+        client.get(format!("https://www.okx.com/api/v5/market/tickers?instType=SWAP&instFamily={family}"))
+            .header("User-Agent", "options-viewer/1.0").send(),
     );
     let fut_json:  serde_json::Value = fut_res?.json().await?;
     let swap_json: serde_json::Value = swap_res?.json().await?;
@@ -136,7 +149,6 @@ async fn poll_okx(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<se
             "lastPrice": t["last"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0),
         }));
     }
-    sort_futures(&mut items);
     Ok(items)
 }
 
@@ -163,7 +175,9 @@ async fn poll_deribit(client: &reqwest::Client, coin: &str) -> anyhow::Result<Ve
     let url = format!(
         "https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency={currency}&kind=future"
     );
-    let json: serde_json::Value = client.get(&url).send().await?.json().await?;
+    let json: serde_json::Value = client.get(&url)
+        .header("User-Agent", "options-viewer/1.0")
+        .send().await?.json().await?;
     let summaries = json["result"].as_array().cloned().unwrap_or_default();
     let mut items: Vec<serde_json::Value> = Vec::new();
     for s in &summaries {
@@ -188,6 +202,5 @@ async fn poll_deribit(client: &reqwest::Client, coin: &str) -> anyhow::Result<Ve
             "lastPrice": s["last"].as_f64().unwrap_or(0.0),
         }));
     }
-    sort_futures(&mut items);
     Ok(items)
 }
