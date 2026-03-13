@@ -160,7 +160,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
     )
   }
 
-  const worstApr = rows.reduce((m, r) => Math.max(m, r.apr), 0) || 1
+  const bestApr = rows.reduce((m, r) => Math.max(m, r.apr), 0) || 1
   const ind = (col: SortCol) => sortCol === col ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
   const thCls = (align: 'left' | 'right', extra = '') =>
     `py-1 text-${align} font-medium cursor-pointer select-none hover:text-ink ${extra}`
@@ -226,7 +226,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
             {rows.map((row, i) => {
               const isBest = i === 0
               const isCall = row.optionType === 'call'
-              const relWidth = Math.min(100, (row.apr / worstApr) * 100)
+              const relWidth = Math.min(100, (row.apr / bestApr) * 100)
               return (
                 <tr
                   key={`${row.expiry}-${row.optionType}-${row.strike}`}
