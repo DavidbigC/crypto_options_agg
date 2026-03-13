@@ -9,11 +9,21 @@ use std::sync::Arc;
 use crate::exchanges::okx::build_response;
 use crate::state::AppState;
 
+const KNOWN_FAMILIES: &[&str] = &["BTC-USD", "ETH-USD"];
+
 pub async fn options_chain(
     State(state): State<Arc<AppState>>,
     Path(inst_family): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
     let family = inst_family.to_uppercase();
+
+    if !KNOWN_FAMILIES.contains(&family.as_str()) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(json!({ "error": format!("Unknown instFamily: {}", family) })),
+        ));
+    }
+
     let greeks = state.okx_greeks.read().await;
     let ticker = state.okx_ticker.read().await;
     let spot = state.okx_spot.read().await;
