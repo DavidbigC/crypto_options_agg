@@ -44,7 +44,12 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
   const [sortCol, setSortCol] = useState<SortCol | null>(null)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
 
-  const targetStrike = strikeInput ? parseFloat(strikeInput) : null
+  const parsedStrike = strikeInput ? parseFloat(strikeInput) : null
+  // Only apply the strike filter when the input is a meaningful number (>= 50% of spot)
+  // This prevents partial deletes like "21" or "2" from picking the lowest OTM strike
+  const targetStrike = parsedStrike && !isNaN(parsedStrike) && parsedStrike >= spotPrice * 0.5
+    ? parsedStrike
+    : null
 
   const rows = useMemo<SellRow[]>(() => {
     if (!optionsData || !spotPrice) return []
@@ -160,7 +165,10 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
   if (!rows.length) {
     return (
       <div className="card py-6 text-center text-sm text-ink-3">
-        No OTM options available.
+        {targetStrike
+          ? `No OTM options found at or above $${targetStrike.toLocaleString()} — try a lower strike.`
+          : 'No OTM options available.'
+        }
       </div>
     )
   }
@@ -198,7 +206,8 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
           <div className="flex items-center gap-1.5">
             <label className="text-[11px] text-ink-3 whitespace-nowrap">Strike</label>
             <input
-              type="number"
+              type="text"
+              inputMode="numeric"
               value={strikeInput}
               onChange={e => setStrikeInput(e.target.value)}
               placeholder="ATM"
