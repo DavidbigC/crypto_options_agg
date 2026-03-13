@@ -29,6 +29,7 @@ async fn main() {
         .unwrap();
 
     exchanges::bybit::start_polling(state.clone(), http_client.clone());
+    exchanges::okx::start(state.clone(), http_client.clone());
 
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
 
@@ -38,6 +39,9 @@ async fn main() {
         .route("/api/options/:base_coin/:expiration", get(routes::bybit::options_chain_expiry))
         .route("/api/spots", get(routes::bybit::spots))
         .route("/api/spot/:symbol", get(routes::bybit::spot_single))
+        .route("/api/okx/options/:inst_family", get(routes::okx::options_chain))
+        .route("/api/okx/spots", get(routes::okx::spots))
+        .route("/api/okx/debug/:inst_family", get(routes::okx::debug))
         .layer(cors)
         .with_state(state);
 
