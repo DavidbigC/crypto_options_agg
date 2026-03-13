@@ -47,7 +47,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
   const targetStrike = strikeInput ? parseFloat(strikeInput) : null
 
   const rows = useMemo<SellRow[]>(() => {
-    if (!optionsData) return []
+    if (!optionsData || !spotPrice) return []
 
     const result: SellRow[] = []
     const now = Date.now()
@@ -114,7 +114,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
   }
 
   const fmtExpiry = (exp: string) =>
-    new Date(exp).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    new Date(exp + 'T08:00:00Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
 
   const handleLoad = (row: SellRow) => {
     const chain = optionsData!.data[row.expiry]
@@ -161,6 +161,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
   }
 
   const bestApr = rows.reduce((m, r) => Math.max(m, r.apr), 0) || 1
+  const maxAprRow = rows.reduce((best, r) => r.apr > best.apr ? r : best, rows[0])
   const ind = (col: SortCol) => sortCol === col ? (sortDir === 'desc' ? ' ↓' : ' ↑') : ''
   const thCls = (align: 'left' | 'right', extra = '') =>
     `py-1 text-${align} font-medium cursor-pointer select-none hover:text-ink ${extra}`
@@ -224,7 +225,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
           </thead>
           <tbody>
             {rows.map((row, i) => {
-              const isBest = i === 0
+              const isBest = row === maxAprRow
               const isCall = row.optionType === 'call'
               const relWidth = Math.min(100, (row.apr / bestApr) * 100)
               return (
