@@ -6,8 +6,9 @@ mod exchanges;
 mod analysis;
 mod sse;
 mod optional;
+mod rate_limit;
 
-use axum::{Router, routing::{get, post}};
+use axum::{Router, middleware, routing::{get, post}};
 use std::sync::Arc;
 use tower_http::cors::{CorsLayer, Any};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -46,7 +47,13 @@ async fn main() {
 
     let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
 
-    let app = Router::new()
+    // SSE routes (separate so they get a lower rate limit in public mode)
+    let sse_routes = Router::new()
+        .route("/api/stream/polymarket/:asset", get(routes::polymarket::stream))
+        .route("/api/stream/:exchange/:coin", get(routes::stream::handler));
+
+    // REST routes
+    let mut rest_routes = Router::new()
         .route("/api/health", get(routes::health::handler))
         .route("/api/options/:base_coin", get(routes::bybit::options_chain))
         .route("/api/options/:base_coin/:expiration", get(routes::bybit::options_chain_expiry))
@@ -66,25 +73,41 @@ async fn main() {
         .route("/api/scanners/:exchange/:coin", get(routes::scanners::handler))
         .route("/api/polymarket/surface/:asset", get(routes::polymarket::surface))
         .route("/api/polymarket/:asset/:horizon", get(routes::polymarket::analysis))
-        .route("/api/stream/polymarket/:asset", get(routes::polymarket::stream))
-        .route("/api/stream/:exchange/:coin", get(routes::stream::handler))
         .route("/api/debug/bybit", get(routes::bybit::debug_bybit));
 
-    let app = if cfg.enable_portfolio {
-        app
-            .route("/api/portfolio/okx", get(optional::okx_portfolio::handler))
-            .route("/api/portfolio/bybit", get(optional::bybit_portfolio::handler))
+    if cfg.enable_portfolio {
+        rest_routes = rest_routes
+            .route("/api/portfolio/okx",  get(optional::okx_portfolio::handler))
+            .route("/api/portfolio/bybit", get(optional::bybit_portfolio::handler));
+    }
+    if cfg.enable_optimizer {
+        rest_routes = rest_routes
+            .route("/api/optimizer/:coin", post(optional::optimizer::handler));
+    }
+
+    // Apply rate limiting in public mode
+    let (rest_routes, sse_routes) = if cfg.app_mode == config::AppMode::Public {
+        let api_limiter    = rate_limit::RateLimiter::new(120, 60);
+        let stream_limiter = rate_limit::RateLimiter::new(20, 60);
+        (
+            rest_routes.layer(middleware::from_fn(move |req, next| {
+                let lim = api_limiter.clone();
+                async move { lim.layer(req, next).await }
+            })),
+            sse_routes.layer(middleware::from_fn(move |req, next| {
+                let lim = stream_limiter.clone();
+                async move { lim.layer(req, next).await }
+            })),
+        )
     } else {
-        app
+        (rest_routes, sse_routes)
     };
 
-    let app = if cfg.enable_optimizer {
-        app.route("/api/optimizer/:coin", post(optional::optimizer::handler))
-    } else {
-        app
-    };
-
-    let app = app.layer(cors).with_state(state);
+    let app = Router::new()
+        .merge(rest_routes)
+        .merge(sse_routes)
+        .layer(cors)
+        .with_state(state);
 
     let addr = format!("0.0.0.0:{}", cfg.port);
     tracing::info!("Listening on {}", addr);
