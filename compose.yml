@@ -13,10 +13,12 @@ services:
     build:
       context: ./frontend
       args:
-        BACKEND_BASE_URL: http://backend:3500
+        BACKEND_BASE_URL: http://host.containers.internal:3500
     restart: unless-stopped
     ports:
       - "3000:3000"
+    environment:
+      - BACKEND_BASE_URL=http://host.containers.internal:3500
     depends_on:
       - backend
 
