@@ -22,6 +22,8 @@ async fn main() {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
+    routes::health::init_start_time();
+
     let cfg = config::Config::from_env();
     let state = Arc::new(state::AppState::new());
 

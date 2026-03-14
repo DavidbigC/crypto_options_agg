@@ -112,6 +112,10 @@ pub async fn handler(
         "gamma":     gamma_rows,
         "vega":      vega_rows,
         "updatedAt": now_ms,
+        "_raw": {
+            "optionsData": options_data,
+            "spotPrice":   spot,
+        },
     });
 
     state.scanners.write().await.insert(cache_key, result.clone());
