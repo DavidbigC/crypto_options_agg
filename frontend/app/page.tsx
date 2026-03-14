@@ -234,7 +234,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-surface">
       <Header exchange={exchange} onExchangeChange={handleExchangeChange} />
 
-      <main className="container mx-auto px-4 py-5 space-y-4">
+      <main className="container mx-auto px-4 py-5 space-y-1">
         <section className="surface-band px-5 py-5">
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap items-start justify-between gap-5">
