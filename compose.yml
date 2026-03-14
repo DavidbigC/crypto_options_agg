@@ -1,0 +1,56 @@
+services:
+  # Rust backend (dev/parallel — port 3501)
+  # When parity is verified, replace `backend` service context with ./backend-rust
+  # and remove this service.
+  backend-rust:
+    build:
+      context: ./backend-rust
+    restart: unless-stopped
+    ports:
+      - "3501:3500"
+    environment:
+      - APP_MODE=private
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    ports:
+      - "3500:3500"
+    environment:
+      - NODE_ENV=production
+      # Add any backend env vars here, e.g.:
+      # SOME_API_KEY: ${SOME_API_KEY}
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Must match the service name above so Next.js rewrites reach the backend
+        BACKEND_BASE_URL: http://backend:3500
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+# --- PRODUCTION (VPS) ---
+# Uncomment below and add a Caddyfile to use Caddy for HTTPS + domain routing.
+# Also remove the `ports` blocks above (Caddy will handle routing).
+#
+#  caddy:
+#    image: caddy:2-alpine
+#    restart: unless-stopped
+#    ports:
+#      - "80:80"
+#      - "443:443"
+#    volumes:
+#      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#      - caddy_data:/data
+#      - caddy_config:/config
+#    depends_on:
+#      - frontend
+#
+#volumes:
+#  caddy_data:
+#  caddy_config:
