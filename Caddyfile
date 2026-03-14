@@ -1,6 +1,6 @@
 # Replace yourdomain.com with your actual domain when deploying to VPS.
 # Caddy automatically provisions HTTPS via Let's Encrypt.
 
-yourdomain.com {
+dcoption.xyz {
     reverse_proxy frontend:3000
 }
