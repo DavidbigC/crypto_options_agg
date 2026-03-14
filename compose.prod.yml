@@ -3,7 +3,7 @@ services:
     ports: []
 
   caddy:
-    image: caddy:2-alpine
+    image: docker.io/library/caddy:2-alpine
     restart: unless-stopped
     ports:
       - "80:80"

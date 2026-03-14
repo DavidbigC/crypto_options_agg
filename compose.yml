@@ -58,7 +58,7 @@ services:
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
 
   cadvisor:
-    image: docker.io/gcr.io/cadvisor/cadvisor:latest
+    image: gcr.io/cadvisor/cadvisor:latest
     restart: unless-stopped
     privileged: true
     volumes:
