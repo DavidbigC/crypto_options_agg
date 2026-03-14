@@ -34,13 +34,10 @@ export default function Header({ exchange, onExchangeChange, hideExchangeSelecto
         <div className="flex flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="min-w-0">
-              <div className="text-[11px] uppercase tracking-[0.24em] text-ink-3">Institutional research workspace</div>
               <Link href="/" className="heading-serif mt-1 inline-block text-2xl font-semibold text-ink hover:text-tone">
-                Volatility Desk
+                dcoptionsboard
               </Link>
-              <p className="mt-1 max-w-xl text-sm text-ink-2">
-                Cross-venue crypto options research across live chains, scanners, and structure analysis.
-              </p>
+              <p className="mt-1 max-w-xl text-sm text-ink-2">Crypto options research.</p>
             </div>
 
             <div className="flex items-center gap-2 self-start">

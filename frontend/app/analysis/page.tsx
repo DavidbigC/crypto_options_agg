@@ -485,11 +485,9 @@ export default function AnalysisPage() {
         <div className="surface-band space-y-4 px-5 py-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Comparative research</div>
-              <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">Volatility research dashboard</h1>
-              <p className="mt-2 max-w-3xl text-sm text-ink-2">
-                Combined is the market anchor. Use venue overlays to compare smile, tenor, skew, and surface dislocations.
-              </p>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Analysis</div>
+              <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">Volatility analysis</h1>
+              <p className="mt-2 max-w-3xl text-sm text-ink-2">Live combined anchor. Venue overlays.</p>
             </div>
             <div className="flex gap-2 flex-wrap">
               {RESEARCH_EXCHANGES.map((exchange) => {

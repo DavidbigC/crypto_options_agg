@@ -3,8 +3,8 @@ import './globals.css'
 import { ThemeProvider } from '@/components/ThemeProvider'
 
 export const metadata: Metadata = {
-  title: 'Volatility Desk',
-  description: 'Institutional crypto options research across Bybit, OKX, Deribit, Derive, and Binance.',
+  title: 'dcoptionsboard',
+  description: 'Crypto options research.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

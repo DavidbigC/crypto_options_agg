@@ -4,7 +4,7 @@
  * then subscribes to the optionMarkPrice WebSocket stream for a few seconds.
  *
  * Run: node backend/binance-test.mjs
- */
+ */asdasd
 
 import { WebSocket } from 'ws'
 

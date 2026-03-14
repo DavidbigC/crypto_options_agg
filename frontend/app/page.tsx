@@ -239,14 +239,11 @@ export default function HomePage() {
           <div className="flex flex-col gap-5">
             <div className="flex flex-wrap items-start justify-between gap-5">
               <div className="max-w-2xl">
-                <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Live options research desk</div>
+                <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Desk</div>
                 <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">
                   {selectedCrypto} {venueLabel} volatility surface
                 </h1>
-                <p className="mt-2 text-sm leading-6 text-ink-2">
-                  Study live options structure by venue and expiry, then open supporting research lenses only when you need a
-                  deeper read on carry, convexity, or dual-investment setups.
-                </p>
+                <p className="mt-2 text-sm leading-6 text-ink-2">Live chain, expiries, and scanners.</p>
               </div>
 
               <div className="grid min-w-[16rem] gap-2 text-sm sm:grid-cols-2">
@@ -297,10 +294,7 @@ export default function HomePage() {
             <div className="flex flex-wrap items-start justify-between gap-3 border-t border-rim/75 pt-4">
               <div className="max-w-xl">
                 <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Research lenses</div>
-                <p className="mt-1 text-sm text-ink-2">
-                  Keep the live chain in focus, and open a lens only when you want a secondary ranking view.
-                  {selectedScannerMeta ? ` ${selectedScannerMeta.buttonLabel} is active.` : ''}
-                </p>
+                <p className="mt-1 text-sm text-ink-2">{selectedScannerMeta ? `${selectedScannerMeta.buttonLabel} active.` : 'Open a lens when needed.'}</p>
               </div>
               <div className="flex flex-wrap gap-1.5">
                 {(SCANNER_ORDER as ScannerKey[]).map((scannerKey) => (

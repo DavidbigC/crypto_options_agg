@@ -261,12 +261,9 @@ export default function PortfolioPageClient() {
         <section className="surface-band px-5 py-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div className="max-w-3xl">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Book and exposure review</div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Portfolio</div>
               <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">Portfolio</h1>
-              <p className="mt-2 text-sm leading-6 text-ink-2">
-                Review live balances, positions, and coin-level greek exposure, then move selected books into the simulator
-                without leaving the research environment.
-              </p>
+              <p className="mt-2 text-sm leading-6 text-ink-2">Balances, risk, and simulator output.</p>
             </div>
 
             <div className="flex items-center gap-1.5 flex-wrap">

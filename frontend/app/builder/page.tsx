@@ -329,12 +329,9 @@ export default function BuilderPage() {
         <div className="flex flex-col gap-4">
           <section className="surface-band px-5 py-5">
             <div className="max-w-3xl">
-              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Supporting worksheet</div>
+              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Builder</div>
               <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">Strategy builder</h1>
-              <p className="mt-2 text-sm leading-6 text-ink-2">
-                Build structured option views without leaving the research workspace. The chain, futures controls, and PnL
-                projection stay together as one continuous worksheet.
-              </p>
+              <p className="mt-2 text-sm leading-6 text-ink-2">Build and review option structures.</p>
             </div>
           </section>
 

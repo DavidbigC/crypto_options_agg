@@ -194,11 +194,8 @@ export default function PolysisPage() {
                 Polysis
               </div>
               <div>
-                <h1 className="heading-serif text-3xl font-semibold tracking-tight text-ink">Prediction-market vol surface</h1>
-                <p className="mt-2 text-sm leading-6 text-ink-2">
-                  Plot Polymarket move signals by expiry. The x-axis is the market resolution date and the y-axis is the move metric,
-                  using terminal move when a close ladder exists and path move when the market is dominated by reach or dip barriers.
-                </p>
+                <h1 className="heading-serif text-3xl font-semibold tracking-tight text-ink">Prediction market surface</h1>
+                <p className="mt-2 text-sm leading-6 text-ink-2">Polymarket moves by expiry.</p>
               </div>
             </div>
 
