@@ -6,7 +6,7 @@ services:
     ports:
       - "3500:3500"
     environment:
-      - APP_MODE=private
+      - APP_MODE=public
       - PORT=3500
 
   frontend:
