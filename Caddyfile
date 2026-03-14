@@ -2,5 +2,5 @@
 # Caddy automatically provisions HTTPS via Let's Encrypt.
 
 dcoption.xyz {
-    reverse_proxy frontend:3000
+    reverse_proxy crypto_options_agg_frontend_1:3000
 }
