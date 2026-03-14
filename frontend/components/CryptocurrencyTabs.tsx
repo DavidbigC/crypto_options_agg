@@ -17,7 +17,7 @@ export default function CryptocurrencyTabs({ selected, onSelect, spotPrice, exch
   const unsupported = new Set<string>(exchange === 'derive' ? ['SOL'] : [])
 
   return (
-    <div className="flex items-center gap-1 shrink-0">
+    <div className="surface-well flex items-center gap-1 p-1 shrink-0">
       {CRYPTOS.map(crypto => {
         const isSelected = selected === crypto
         const disabled = unsupported.has(crypto)
@@ -27,15 +27,22 @@ export default function CryptocurrencyTabs({ selected, onSelect, spotPrice, exch
             onClick={() => !disabled && onSelect(crypto)}
             disabled={disabled}
             className={classNames(
-              'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors border',
+              'min-w-[5.5rem] rounded-[0.8rem] px-3 py-2 text-left transition-colors',
               disabled
-                ? 'opacity-30 cursor-not-allowed text-ink-3 bg-muted border-rim'
+                ? 'cursor-not-allowed text-ink-3 opacity-35'
                 : isSelected
-                ? 'bg-tone/10 text-tone border-tone/30'
-                : 'text-ink-2 hover:text-ink bg-muted border-rim'
+                  ? 'bg-card text-ink shadow-sm ring-1 ring-rim'
+                  : 'text-ink-2 hover:bg-card/70 hover:text-ink'
             )}
           >
-            <span>{crypto}</span>
+            <div className="text-sm font-semibold">{crypto}</div>
+            <div className="mt-0.5 text-[11px] text-ink-3">
+              {isSelected && spotPrice > 0
+                ? `${Math.round(spotPrice).toLocaleString()} ${unit}`
+                : disabled
+                  ? 'Unavailable'
+                  : 'Research'}
+            </div>
           </button>
         )
       })}

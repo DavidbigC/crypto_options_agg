@@ -1,5 +1,5 @@
-const FRESH_MS = 15_000
-const STALE_MS = 60_000
+const FRESH_MS = 30_000
+const STALE_MS = 90_000
 
 function roundTo(value, digits = 2) {
   return Number(value.toFixed(digits))
@@ -97,7 +97,7 @@ export function getDatasetFreshness(updatedAt, now = Date.now()) {
 
   const ageMs = Math.max(0, now - updatedAt)
   if (ageMs <= FRESH_MS) {
-    return { status: 'fresh', ageMs, label: 'Fresh' }
+    return { status: 'fresh', ageMs, label: 'Current' }
   }
   if (ageMs <= STALE_MS) {
     return { status: 'aging', ageMs, label: `${Math.round(ageMs / 1000)}s old` }

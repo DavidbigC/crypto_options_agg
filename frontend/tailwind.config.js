@@ -23,6 +23,8 @@ module.exports = {
         },
       },
       fontFamily: {
+        sans: ['"Avenir Next"', '"Segoe UI"', '"Helvetica Neue"', 'ui-sans-serif', 'sans-serif'],
+        serif: ['Iowan Old Style', 'Palatino', 'Book Antiqua', 'Georgia', 'serif'],
         mono: ['Monaco', 'Menlo', 'monospace'],
       },
     },

@@ -101,10 +101,17 @@ assert.equal(surface.cells.length, 2)
 assert.equal(surface.cells[0].spread, -0.9)
 assert.equal(surface.cells[1].spread, -0.5)
 
-const freshness = getDatasetFreshness(datasets.deribit.updatedAt, Date.UTC(2026, 2, 11, 11, 0, 5))
+const freshness = getDatasetFreshness(datasets.deribit.updatedAt, Date.UTC(2026, 2, 11, 11, 0, 20))
 assert.equal(freshness.status, 'fresh')
+assert.equal(freshness.label, 'Current')
+
+const aging = getDatasetFreshness(datasets.deribit.updatedAt, Date.UTC(2026, 2, 11, 11, 1, 5))
+assert.equal(aging.status, 'aging')
 
 const stale = getDatasetFreshness(datasets.okx.updatedAt, Date.UTC(2026, 2, 11, 11, 0, 5))
 assert.equal(stale.status, 'stale')
+
+const fullyStale = getDatasetFreshness(datasets.deribit.updatedAt, Date.UTC(2026, 2, 11, 11, 1, 25))
+assert.equal(fullyStale.status, 'stale')
 
 console.log('analysisComparison.test: ok')

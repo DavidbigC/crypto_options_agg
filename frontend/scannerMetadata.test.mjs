@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 
 const { SCANNER_ORDER, SCANNER_META } = await import('./lib/scannerMetadata.mjs')
 
-test('dual investment scanner metadata leads toolbar and uses exchange-style copy', () => {
+test('research lenses keep dual-income first and use research-oriented labels', () => {
   assert.deepEqual(
     SCANNER_ORDER.map((key) => SCANNER_META[key].buttonLabel),
-    ['Dual Invest', 'Gamma Scanner', 'V Scanner'],
+    ['Dual Income', 'Gamma Lens', 'Vega Lens'],
   )
   assert.equal(SCANNER_ORDER[0], 'sell')
   assert.equal(SCANNER_META.sell.panelTitle, 'Dual Investment')

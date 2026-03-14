@@ -3,8 +3,8 @@ import './globals.css'
 import { ThemeProvider } from '@/components/ThemeProvider'
 
 export const metadata: Metadata = {
-  title: 'Options',
-  description: 'Crypto options chain viewer — Bybit · OKX · Deribit',
+  title: 'Volatility Desk',
+  description: 'Institutional crypto options research across Bybit, OKX, Deribit, Derive, and Binance.',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -20,7 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           } catch(e) {}
         ` }} />
       </head>
-      <body>
+      <body className="antialiased">
         <ThemeProvider>
           {children}
         </ThemeProvider>

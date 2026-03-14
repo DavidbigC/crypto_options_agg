@@ -4,6 +4,12 @@ function formatUsdRange(low, high) {
   return `${fmt(low)}-${fmt(high)}`
 }
 
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === '') return null
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric : null
+}
+
 export function mapPolymarketResponse(payload) {
   return {
     asset: payload?.asset ?? null,
@@ -33,6 +39,13 @@ export function mapPolymarketSurface(payload) {
   }
 }
 
+export function getPolysisActiveSpot(spotOverride, referenceSpot) {
+  const override = toFiniteNumber(spotOverride)
+  if (override && override > 0) return override
+  if (referenceSpot && referenceSpot > 0) return referenceSpot
+  return null
+}
+
 function formatExpiryLabel(value) {
   if (!value) return 'Unknown'
   const date = new Date(value)
@@ -48,11 +61,11 @@ export function buildPolysisExpirySeries(entries) {
   return (Array.isArray(entries) ? entries : [])
     .filter((entry) => entry && entry.expiryDate)
     .map((entry) => {
-      const pathMove = Number(entry?.pathSummary?.pathMovePct)
-      const expectedMove = Number(entry?.summary?.expectedMovePct)
-      const movePct = Number.isFinite(pathMove)
+      const pathMove = toFiniteNumber(entry?.pathSummary?.pathMovePct)
+      const expectedMove = toFiniteNumber(entry?.summary?.expectedMovePct)
+      const movePct = pathMove !== null
         ? pathMove
-        : Number.isFinite(expectedMove)
+        : expectedMove !== null
           ? expectedMove
           : null
 
@@ -62,9 +75,9 @@ export function buildPolysisExpirySeries(entries) {
         expiryDate: entry.expiryDate,
         expiryLabel: formatExpiryLabel(entry.expiryDate),
         movePct,
-        upPct: Number.isFinite(Number(entry?.pathSummary?.upsidePathPct)) ? Number(entry.pathSummary.upsidePathPct) : null,
-        downPct: Number.isFinite(Number(entry?.pathSummary?.downsidePathPct)) ? Number(entry.pathSummary.downsidePathPct) : null,
-        signalType: Number.isFinite(pathMove) ? 'path' : 'terminal',
+        upPct: toFiniteNumber(entry?.pathSummary?.upsidePathPct),
+        downPct: toFiniteNumber(entry?.pathSummary?.downsidePathPct),
+        signalType: pathMove !== null ? 'path' : 'terminal',
         marketCount: Number(entry?.confidence?.marketCount ?? entry?.sourceMarkets?.length ?? 0),
       }
     })

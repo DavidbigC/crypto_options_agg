@@ -59,7 +59,7 @@ export default function ExpirationTabs({ expirations = [], selected, onSelect, o
   }
 
   return (
-    <div className="flex overflow-x-auto gap-1 pb-0.5">
+    <div className="flex overflow-x-auto gap-1.5 pb-0.5">
       {expirations.map(expiration => {
         const isSelected = selected === expiration
         const counts = optionsCounts[expiration]
@@ -71,13 +71,13 @@ export default function ExpirationTabs({ expirations = [], selected, onSelect, o
             key={expiration}
             onClick={() => onSelect(expiration)}
             className={classNames(
-              'relative flex-shrink-0 px-2.5 pt-1 pb-2 rounded text-[10px] font-mono font-medium transition-colors whitespace-nowrap border overflow-hidden',
+              'relative min-w-[5.9rem] flex-shrink-0 overflow-hidden rounded-[0.95rem] border px-3 pt-2 pb-2.5 text-left text-[11px] font-medium whitespace-nowrap transition-colors',
               isSelected
-                ? 'bg-tone text-white border-tone'
-                : 'bg-muted text-ink-2 hover:text-ink border-rim'
+                ? 'border-rim bg-card text-ink shadow-sm'
+                : 'border-rim/80 bg-card/55 text-ink-2 hover:text-ink'
             )}
           >
-            <div className="flex items-center justify-center gap-0.5 h-2.5">
+            <div className="flex h-2.5 items-center gap-0.5">
               {strategies && STRATEGY_PIPS.filter(p => strategies.has(p.key)).map(p => (
                 <span
                   key={p.key}
@@ -86,15 +86,17 @@ export default function ExpirationTabs({ expirations = [], selected, onSelect, o
                 />
               ))}
             </div>
-            <div>{formatDate(expiration)}</div>
-            <div className={classNames('text-[9px] mt-0.5', isSelected ? 'text-white/70' : 'text-ink-3')}>
-              {counts ? total : '\u00a0'}
+            <div className={classNames('mt-1 font-mono', isSelected ? 'text-tone' : 'text-ink')}>
+              {formatDate(expiration)}
+            </div>
+            <div className="mt-1 text-[11px] text-ink-3">
+              {counts ? `${total} contracts` : '\u00a0'}
             </div>
             {exCounts ? (
               <div
                 className={classNames(
-                  'absolute left-1.5 right-1.5 bottom-1 flex h-1.5 overflow-hidden rounded-full',
-                  isSelected ? 'opacity-100' : 'opacity-80',
+                  'absolute bottom-1.5 left-2 right-2 flex h-1 overflow-hidden rounded-full',
+                  isSelected ? 'opacity-100' : 'opacity-75',
                 )}
               >
                 {buildExchangeSegments(exCounts).map(({ exchange, count, color }) => (

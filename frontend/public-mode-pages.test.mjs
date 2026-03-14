@@ -43,3 +43,18 @@ test('header links do not expose optimizer navigation even in private mode', () 
 
   assert.equal(links.some((link) => link.href === '/optimizer'), false)
 })
+
+test('header links present the research desk navigation in the expected order', () => {
+  const links = getHeaderLinks({ NEXT_PUBLIC_APP_MODE: 'private' })
+
+  assert.deepEqual(
+    links.map((link) => [link.href, link.label]),
+    [
+      ['/', 'Desk'],
+      ['/analysis', 'Analysis'],
+      ['/polysis', 'Polysis'],
+      ['/builder', 'Builder'],
+      ['/portfolio', 'Portfolio'],
+    ],
+  )
+})

@@ -325,8 +325,19 @@ export default function BuilderPage() {
   return (
     <div className="min-h-screen bg-surface">
       <Header exchange={exchange} onExchangeChange={handleExchangeChange} />
-      <main className="container mx-auto px-4 py-4">
+      <main className="container mx-auto px-4 py-5">
         <div className="flex flex-col gap-4">
+          <section className="surface-band px-5 py-5">
+            <div className="max-w-3xl">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Supporting worksheet</div>
+              <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">Strategy builder</h1>
+              <p className="mt-2 text-sm leading-6 text-ink-2">
+                Build structured option views without leaving the research workspace. The chain, futures controls, and PnL
+                projection stay together as one continuous worksheet.
+              </p>
+            </div>
+          </section>
+
           <MiniChain
             exchange={exchange}
             coin={coin}

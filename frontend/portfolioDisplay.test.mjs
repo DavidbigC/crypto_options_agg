@@ -18,3 +18,20 @@ test('getPortfolioDisplayData provides safe defaults for partial portfolio paylo
   assert.deepEqual(data.greeksByCoin, {})
   assert.deepEqual(data.positions, [])
 })
+
+test('getPortfolioDisplayData preserves per-coin greek summaries', () => {
+  const data = getPortfolioDisplayData({
+    exchange: 'okx',
+    greeks: {
+      total: { delta: 1, gamma: 2, theta: 3, vega: 4 },
+      byCoin: {
+        BTC: { delta: 0.1, gamma: 0.2, theta: 0.3, vega: 0.4 },
+      },
+    },
+    positions: [],
+  }, 'OKX')
+
+  assert.deepEqual(data.greeksByCoin, {
+    BTC: { delta: 0.1, gamma: 0.2, theta: 0.3, vega: 0.4 },
+  })
+})

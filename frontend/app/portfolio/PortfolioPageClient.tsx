@@ -257,20 +257,28 @@ export default function PortfolioPageClient() {
     <div className="min-h-screen bg-surface">
       <Header exchange="okx" onExchangeChange={() => {}} />
 
-      <main className="container mx-auto px-4 py-3 space-y-3">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <h1 className="text-xl font-semibold text-ink">Portfolio</h1>
+      <main className="container mx-auto px-4 py-5 space-y-4">
+        <section className="surface-band px-5 py-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="max-w-3xl">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Book and exposure review</div>
+              <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">Portfolio</h1>
+              <p className="mt-2 text-sm leading-6 text-ink-2">
+                Review live balances, positions, and coin-level greek exposure, then move selected books into the simulator
+                without leaving the research environment.
+              </p>
+            </div>
 
-          <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap">
             <button
               onClick={() => setShowExchange((prev) => ({ ...prev, okx: !prev.okx }))}
-              className={`rounded border px-2.5 py-1 text-xs font-medium transition-colors ${showExchange.okx ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400' : 'border-rim bg-card text-ink-3 hover:border-ink-3'}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${showExchange.okx ? 'border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400' : 'border-rim bg-card text-ink-3 hover:border-ink-3'}`}
             >
               OKX
             </button>
             <button
               onClick={() => setShowExchange((prev) => ({ ...prev, bybit: !prev.bybit }))}
-              className={`rounded border px-2.5 py-1 text-xs font-medium transition-colors ${showExchange.bybit ? 'border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-400' : 'border-rim bg-card text-ink-3 hover:border-ink-3'}`}
+              className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${showExchange.bybit ? 'border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-400' : 'border-rim bg-card text-ink-3 hover:border-ink-3'}`}
             >
               Bybit
             </button>
@@ -278,26 +286,27 @@ export default function PortfolioPageClient() {
             <button
               onClick={() => clearImportedExchange('okx')}
               disabled={!simulatorLoadedExchanges.has('okx')}
-              className="rounded border border-rim bg-card px-2.5 py-1 text-xs font-medium text-ink transition-colors hover:border-ink-3 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-rim bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:border-ink-3 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Clear OKX
             </button>
             <button
               onClick={() => clearImportedExchange('bybit')}
               disabled={!simulatorLoadedExchanges.has('bybit')}
-              className="rounded border border-rim bg-card px-2.5 py-1 text-xs font-medium text-ink transition-colors hover:border-ink-3 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-rim bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:border-ink-3 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Clear Bybit
             </button>
             <button
               onClick={() => loadPortfolios(true)}
               disabled={refreshing}
-              className="rounded border border-rim bg-card px-2.5 py-1 text-xs font-medium text-ink transition-colors hover:border-ink-3 disabled:cursor-not-allowed disabled:opacity-50"
+              className="rounded-full border border-rim bg-card px-3 py-1.5 text-xs font-medium text-ink transition-colors hover:border-ink-3 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {refreshing ? 'Refreshing…' : 'Refresh'}
             </button>
           </div>
-        </div>
+          </div>
+        </section>
 
         {!hasVisibleExchange ? (
           <div className="card">

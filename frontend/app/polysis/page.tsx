@@ -17,6 +17,7 @@ import {
   buildPolysisDistributionChartData,
   buildPolysisExpirySeries,
   formatPolysisConfidence,
+  getPolysisActiveSpot,
   mapPolymarketSurface,
 } from '@/lib/polysis.js'
 import type { PolysisResponse, PolysisSourceMarket, PolysisSurfaceResponse } from '@/types/polysis'
@@ -49,7 +50,8 @@ function formatBarrier(value: number | null | undefined) {
 
 function formatExpiry(value: string | null | undefined) {
   if (!value) return 'Unknown'
-  const date = new Date(value)
+  const numeric = Number(value)
+  const date = Number.isFinite(numeric) ? new Date(numeric) : new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleDateString('en-US', {
     month: 'short',
@@ -118,10 +120,15 @@ export default function PolysisPage() {
   }, [asset])
 
   useEffect(() => {
+    const activeSpot = getPolysisActiveSpot(spotPrice, referenceSpot)
+    if (!activeSpot) {
+      setLoading(true)
+      setError(null)
+      return
+    }
+
     setLoading(true)
     setError(null)
-
-    const activeSpot = Number(spotPrice) > 0 ? Number(spotPrice) : referenceSpot
     const query = activeSpot && activeSpot > 0 ? `?spotPrice=${encodeURIComponent(activeSpot)}` : ''
     const eventSource = new EventSource(ssePath(`stream/polymarket/${asset}${query}`))
 
@@ -179,16 +186,16 @@ export default function PolysisPage() {
     <div className="min-h-screen bg-surface">
       <Header exchange="combined" onExchangeChange={() => {}} hideExchangeSelector />
 
-      <main className="container mx-auto space-y-4 px-4 py-4">
-        <section className="card overflow-hidden">
+      <main className="container mx-auto space-y-4 px-4 py-5">
+        <section className="surface-band overflow-hidden px-5 py-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="max-w-2xl space-y-2">
               <div className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-ink-2">
                 Polysis
               </div>
               <div>
-                <h1 className="text-xl font-semibold tracking-tight text-ink">Prediction-Market Vol Surface</h1>
-                <p className="mt-2 text-sm text-ink-2">
+                <h1 className="heading-serif text-3xl font-semibold tracking-tight text-ink">Prediction-market vol surface</h1>
+                <p className="mt-2 text-sm leading-6 text-ink-2">
                   Plot Polymarket move signals by expiry. The x-axis is the market resolution date and the y-axis is the move metric,
                   using terminal move when a close ladder exists and path move when the market is dominated by reach or dip barriers.
                 </p>

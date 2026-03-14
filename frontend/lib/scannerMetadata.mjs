@@ -2,9 +2,9 @@ export const SCANNER_ORDER = ['sell', 'gamma', 'vega']
 
 export const SCANNER_META = {
   sell: {
-    buttonLabel: 'Dual Invest',
-    activeClass: 'bg-sky-600 text-white border-sky-600',
-    idleClass: 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink',
+    buttonLabel: 'Dual Income',
+    activeClass: 'bg-card text-ink border-rim shadow-sm ring-1 ring-rim',
+    idleClass: 'text-ink-2 border-rim hover:bg-card hover:text-ink',
     panelTitle: 'Dual Investment',
     panelSubtitle: 'Earn yield by selling higher or buying lower with cash-secured option setups.',
     typeLabels: {
@@ -13,13 +13,13 @@ export const SCANNER_META = {
     },
   },
   gamma: {
-    buttonLabel: 'Gamma Scanner',
-    activeClass: 'bg-violet-600 text-white border-violet-600',
-    idleClass: 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink',
+    buttonLabel: 'Gamma Lens',
+    activeClass: 'bg-card text-ink border-rim shadow-sm ring-1 ring-rim',
+    idleClass: 'text-ink-2 border-rim hover:bg-card hover:text-ink',
   },
   vega: {
-    buttonLabel: 'V Scanner',
-    activeClass: 'bg-emerald-600 text-white border-emerald-600',
-    idleClass: 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink',
+    buttonLabel: 'Vega Lens',
+    activeClass: 'bg-card text-ink border-rim shadow-sm ring-1 ring-rim',
+    idleClass: 'text-ink-2 border-rim hover:bg-card hover:text-ink',
   },
 }

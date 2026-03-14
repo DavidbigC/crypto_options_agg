@@ -5,6 +5,7 @@ import {
   buildPolysisExpirySeries,
   buildPolysisDistributionChartData,
   formatPolysisConfidence,
+  getPolysisActiveSpot,
   mapPolymarketResponse,
   mapPolymarketSurface,
 } from './lib/polysis.js'
@@ -104,6 +105,38 @@ test('buildPolysisExpirySeries prefers path move and sorts by expiry date', () =
   assert.equal(rows[1].upPct, 20)
   assert.equal(rows[1].downPct, 15)
   assert.equal(rows[1].signalType, 'path')
+})
+
+test('buildPolysisExpirySeries preserves null move values instead of coercing them to zero', () => {
+  const [row] = buildPolysisExpirySeries([
+    {
+      asset: 'BTC',
+      horizon: 'weekly',
+      expiryDate: '2026-03-16T04:00:00Z',
+      pathSummary: {
+        pathMovePct: null,
+        upsidePathPct: null,
+        downsidePathPct: null,
+      },
+      summary: {
+        expectedMovePct: null,
+      },
+      confidence: {
+        marketCount: 5,
+      },
+    },
+  ])
+
+  assert.equal(row.movePct, null)
+  assert.equal(row.upPct, null)
+  assert.equal(row.downPct, null)
+  assert.equal(row.signalType, 'terminal')
+})
+
+test('getPolysisActiveSpot waits for a positive override or reference spot', () => {
+  assert.equal(getPolysisActiveSpot('', null), null)
+  assert.equal(getPolysisActiveSpot('0', 70664), 70664)
+  assert.equal(getPolysisActiveSpot('70664', null), 70664)
 })
 
 test('mapPolymarketSurface maps each horizon through the response mapper', () => {

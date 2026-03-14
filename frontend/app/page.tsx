@@ -222,49 +222,105 @@ export default function HomePage() {
 
   const chainData = selectedExpiration ? optionsData?.data?.[selectedExpiration] : undefined
   const effectiveSpotPrice = chainData?.forwardPrice || spotPrice
+  const filteredExpirations = optionsData?.expirations ? filterExpirations(optionsData.expirations) : []
+  const selectedScannerMeta = activeScanner ? SCANNER_META[activeScanner] : null
+  const venueLabel = exchange === 'combined'
+    ? 'Cross-venue'
+    : exchange === 'okx'
+      ? 'OKX'
+      : exchange.charAt(0).toUpperCase() + exchange.slice(1)
 
   return (
     <div className="min-h-screen bg-surface">
       <Header exchange={exchange} onExchangeChange={handleExchangeChange} />
 
-      <main className="container mx-auto px-4 py-4 space-y-3">
-        {/* Toolbar */}
-        <div className="flex items-start gap-3 flex-wrap">
-          <CryptocurrencyTabs
-            selected={selectedCrypto}
-            onSelect={handleCryptoChange}
-            spotPrice={spotPrice}
-            exchange={exchange}
-          />
-          {optionsData?.expirations && (
-            <div className="flex-1 min-w-0">
-              <ExpirationTabs
-                expirations={filterExpirations(optionsData.expirations)}
-                selected={selectedExpiration}
-                onSelect={(exp) => { selectedExpirationRef.current = exp; setSelectedExpiration(exp) }}
-                optionsCounts={optionsData.expirationCounts}
-                arbExpiryStrategies={arbExpiryStrategies}
-                expiryExchangeCounts={expiryExchangeCounts}
-              />
+      <main className="container mx-auto px-4 py-5 space-y-4">
+        <section className="surface-band px-5 py-5">
+          <div className="flex flex-col gap-5">
+            <div className="flex flex-wrap items-start justify-between gap-5">
+              <div className="max-w-2xl">
+                <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Live options research desk</div>
+                <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">
+                  {selectedCrypto} {venueLabel} volatility surface
+                </h1>
+                <p className="mt-2 text-sm leading-6 text-ink-2">
+                  Study live options structure by venue and expiry, then open supporting research lenses only when you need a
+                  deeper read on carry, convexity, or dual-investment setups.
+                </p>
+              </div>
+
+              <div className="grid min-w-[16rem] gap-2 text-sm sm:grid-cols-2">
+                <div className="surface-well px-3 py-2">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Venue scope</div>
+                  <div className="mt-1 font-medium text-ink">{venueLabel}</div>
+                </div>
+                <div className="surface-well px-3 py-2">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Selected expiry</div>
+                  <div className="mt-1 font-medium text-ink">{selectedExpiration || 'Awaiting stream'}</div>
+                </div>
+                <div className="surface-well px-3 py-2">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Reference spot</div>
+                  <div className="mt-1 font-medium text-ink">
+                    {effectiveSpotPrice > 0 ? `$${Math.round(effectiveSpotPrice).toLocaleString()}` : 'Loading'}
+                  </div>
+                </div>
+                <div className="surface-well px-3 py-2">
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-ink-3">Last update</div>
+                  <div className="mt-1 font-medium text-ink">
+                    {lastUpdated ? lastUpdated.toLocaleTimeString() : 'Waiting for feed'}
+                  </div>
+                </div>
+              </div>
             </div>
-          )}
-          <div className="flex-shrink-0 self-start flex gap-1">
-            {(SCANNER_ORDER as ScannerKey[]).map((scannerKey) => (
-              <button
-                key={scannerKey}
-                onClick={() => setActiveScanner(v => v === scannerKey ? null : scannerKey)}
-                className={classNames(
-                  'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
-                  activeScanner === scannerKey
-                    ? SCANNER_META[scannerKey].activeClass
-                    : SCANNER_META[scannerKey].idleClass
-                )}
-              >
-                {SCANNER_META[scannerKey].buttonLabel}
-              </button>
-            ))}
+
+            <div className="flex flex-wrap items-start gap-3">
+              <CryptocurrencyTabs
+                selected={selectedCrypto}
+                onSelect={handleCryptoChange}
+                spotPrice={spotPrice}
+                exchange={exchange}
+              />
+              {filteredExpirations.length > 0 && (
+                <div className="min-w-0 flex-1">
+                  <ExpirationTabs
+                    expirations={filteredExpirations}
+                    selected={selectedExpiration}
+                    onSelect={(exp) => { selectedExpirationRef.current = exp; setSelectedExpiration(exp) }}
+                    optionsCounts={optionsData?.expirationCounts ?? {}}
+                    arbExpiryStrategies={arbExpiryStrategies}
+                    expiryExchangeCounts={expiryExchangeCounts}
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-start justify-between gap-3 border-t border-rim/75 pt-4">
+              <div className="max-w-xl">
+                <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Research lenses</div>
+                <p className="mt-1 text-sm text-ink-2">
+                  Keep the live chain in focus, and open a lens only when you want a secondary ranking view.
+                  {selectedScannerMeta ? ` ${selectedScannerMeta.buttonLabel} is active.` : ''}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(SCANNER_ORDER as ScannerKey[]).map((scannerKey) => (
+                  <button
+                    key={scannerKey}
+                    onClick={() => setActiveScanner(v => v === scannerKey ? null : scannerKey)}
+                    className={classNames(
+                      'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                      activeScanner === scannerKey
+                        ? SCANNER_META[scannerKey].activeClass
+                        : SCANNER_META[scannerKey].idleClass
+                    )}
+                  >
+                    {SCANNER_META[scannerKey].buttonLabel}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
-        </div>
+        </section>
 
         <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${activeScanner === 'gamma' ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
           <div className="overflow-hidden">
@@ -302,8 +358,13 @@ export default function HomePage() {
 
         {/* Options chain */}
         {loading ? (
-          <div className="card flex items-center justify-center h-64">
-            <p className="text-ink-2 text-sm">Loading…</p>
+          <div className="surface-band flex min-h-[16rem] items-center justify-center px-6 py-10">
+            <div className="max-w-md text-center">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Refreshing research surface</div>
+              <p className="mt-2 text-sm text-ink-2">
+                Pulling live chain data for {selectedCrypto} across the selected venue scope.
+              </p>
+            </div>
           </div>
         ) : chainData ? (
           exchange === 'combined' ? (
@@ -346,10 +407,13 @@ export default function HomePage() {
             />
           )
         ) : (
-          <div className="card flex items-center justify-center h-64">
-            <p className="text-ink-2 text-sm">
-              {optionsData ? `No data for ${selectedExpiration}` : 'Select an expiration date'}
-            </p>
+          <div className="surface-band flex min-h-[16rem] items-center justify-center px-6 py-10">
+            <div className="max-w-md text-center">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">No active surface</div>
+              <p className="mt-2 text-sm text-ink-2">
+                {optionsData ? `No data is currently available for ${selectedExpiration}.` : 'Select an expiry to begin the desk view.'}
+              </p>
+            </div>
           </div>
         )}
       </main>

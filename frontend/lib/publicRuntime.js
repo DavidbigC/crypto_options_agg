@@ -26,9 +26,10 @@ export function isOptimizerEnabled(env = process.env) {
 export function getHeaderLinks(env = process.env) {
   const runtime = getPublicRuntime(env)
   return [
+    { href: '/', label: 'Desk' },
     { href: '/analysis', label: 'Analysis' },
     { href: '/polysis', label: 'Polysis' },
-    { href: '/builder', label: 'Strategy Builder' },
+    { href: '/builder', label: 'Builder' },
     ...(runtime.portfolioEnabled ? [{ href: '/portfolio', label: 'Portfolio' }] : []),
   ]
 }

@@ -226,13 +226,16 @@ export default function ArbPanel({ boxSpreads, arbs, expiration, coin, spotPrice
   if (all.length === 0) return null
 
   return (
-    <div className="card">
+    <div className="surface-band px-5 py-5">
       <button
         onClick={() => setIsOpen(v => !v)}
         className="flex items-center gap-3 w-full text-left mb-0 group"
       >
-        <h2 className="text-sm font-semibold text-ink">Arbitrage Opportunities</h2>
-        <span className="text-xs text-ink-3">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-ink-3">Contextual opportunities</div>
+          <h2 className="heading-serif mt-1 text-2xl font-semibold text-ink">Arbitrage ledger</h2>
+        </div>
+        <span className="text-sm text-ink-2">
           {fmtDate(expiration)} · {all.length} found · fees included
         </span>
         {/* Legend — only when open */}

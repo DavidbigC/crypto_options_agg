@@ -1,11 +1,24 @@
+/**
+ * @typedef {import('./portfolio').PortfolioGreeks} PortfolioGreeks
+ * @typedef {import('./portfolio').PortfolioPosition} PortfolioPosition
+ * @typedef {import('./portfolio').PortfolioResponse} PortfolioResponse
+ */
+
+/**
+ * @param {PortfolioResponse | null | undefined} portfolio
+ * @param {string} fallbackExchangeLabel
+ */
 export function getPortfolioDisplayData(portfolio, fallbackExchangeLabel) {
   const exchangeId = typeof portfolio?.exchange === 'string' && portfolio.exchange
     ? portfolio.exchange
     : ''
   const account = portfolio?.account ?? {}
   const summary = portfolio?.summary ?? {}
-  const totalGreeks = portfolio?.greeks?.total ?? {}
+  /** @type {PortfolioGreeks} */
+  const totalGreeks = portfolio?.greeks?.total ?? { delta: 0, gamma: 0, theta: 0, vega: 0 }
+  /** @type {Record<string, PortfolioGreeks>} */
   const greeksByCoin = portfolio?.greeks?.byCoin ?? {}
+  /** @type {PortfolioPosition[]} */
   const positions = Array.isArray(portfolio?.positions) ? portfolio.positions : []
 
   return {

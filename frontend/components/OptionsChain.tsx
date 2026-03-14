@@ -201,12 +201,13 @@ export default function OptionsChain({ data, spotPrice, expiration, lastUpdated,
   const daysToExpiry = Math.max(0.01, (new Date(expiration + 'T08:00:00Z').getTime() - Date.now()) / 86_400_000)
 
   return (
-    <div className="card">
+    <div className="surface-band px-5 py-5">
       <div className="flex items-center justify-between mb-4 gap-4">
         <div>
-          <h2 className="text-sm font-semibold text-ink">Options Chain</h2>
-          <p className="text-xs text-ink-3 mt-0.5">
-            {new Date(expiration).toLocaleDateString()} · Fwd{' '}
+          <div className="text-[11px] uppercase tracking-[0.18em] text-ink-3">Primary surface</div>
+          <h2 className="heading-serif mt-1 text-2xl font-semibold text-ink">Options chain</h2>
+          <p className="mt-1 text-sm text-ink-2">
+            {new Date(expiration).toLocaleDateString()} · Forward{' '}
             <span className="font-mono text-ink">${spotPrice.toLocaleString()}</span>
           </p>
           <div className="mt-2">
@@ -214,23 +215,23 @@ export default function OptionsChain({ data, spotPrice, expiration, lastUpdated,
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="surface-well flex items-center gap-2 px-2 py-2">
           {exchange === 'okx' && (
-            <div className="flex rounded-md overflow-hidden border border-rim text-xs">
+            <div className="flex overflow-hidden rounded-full border border-rim text-xs">
               <button
-                className={`px-2 py-1 ${priceUnit === 'usd' ? 'bg-tone text-white' : 'text-ink-2 hover:bg-muted'}`}
+                className={`px-3 py-1.5 ${priceUnit === 'usd' ? 'bg-card text-ink shadow-sm' : 'text-ink-2 hover:bg-card/75'}`}
                 onClick={() => setPriceUnit('usd')}
               >USD</button>
               <button
-                className={`px-2 py-1 ${priceUnit === 'btc' ? 'bg-tone text-white' : 'text-ink-2 hover:bg-muted'}`}
+                className={`px-3 py-1.5 ${priceUnit === 'btc' ? 'bg-card text-ink shadow-sm' : 'text-ink-2 hover:bg-card/75'}`}
                 onClick={() => setPriceUnit('btc')}
               >BTC</button>
             </div>
           )}
           <button
             onClick={() => setFeesOn(f => !f)}
-            className={`px-2 py-1 rounded border text-xs font-medium transition-colors ${
-              feesOn ? 'bg-amber-500 text-white border-amber-500' : 'text-ink-2 border-rim hover:bg-muted'
+            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+              feesOn ? 'bg-card text-ink border-rim shadow-sm ring-1 ring-rim' : 'text-ink-2 border-rim hover:bg-card/75'
             }`}
           >
             Fees {feesOn ? 'On' : 'Off'}
@@ -253,9 +254,9 @@ export default function OptionsChain({ data, spotPrice, expiration, lastUpdated,
           </colgroup>
           <thead>
             <tr className="border-b border-rim">
-              <th colSpan={11} className="text-center py-1 text-green-700 dark:text-green-400 font-semibold bg-green-50 dark:bg-green-900/20 text-xs">CALLS</th>
+              <th colSpan={10} className="bg-muted/70 py-2 text-center text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-2">Calls</th>
               <th className="w-16" />
-              <th colSpan={11} className="text-center py-1 text-red-600 dark:text-red-400 font-semibold bg-red-50 dark:bg-red-900/20 text-xs">PUTS</th>
+              <th colSpan={10} className="bg-muted/70 py-2 text-center text-[11px] font-semibold uppercase tracking-[0.16em] text-ink-2">Puts</th>
             </tr>
             <tr className="border-b border-rim text-ink-2 text-xs">
               <GreekTh symbol="V" name="Vega" description="price change per 1% move in implied vol" className="px-1 py-1 text-right" />
@@ -301,11 +302,11 @@ export default function OptionsChain({ data, spotPrice, expiration, lastUpdated,
         </table>
       </div>
 
-      <div className="mt-3 pt-3 border-t border-rim grid grid-cols-4 gap-4 text-xs">
-        <div><div className="text-ink-3">Total Calls</div><div className="text-ink font-semibold">{data.calls.length}</div></div>
-        <div><div className="text-ink-3">Total Puts</div><div className="text-ink font-semibold">{data.puts.length}</div></div>
-        <div><div className="text-ink-3">ATM Strike</div><div className="text-ink font-semibold">{atmStrike?.toLocaleString() ?? '--'}</div></div>
-        <div><div className="text-ink-3">Strikes</div><div className="text-ink font-semibold">{sortedStrikes.length}</div></div>
+      <div className="mt-4 grid gap-3 border-t border-rim pt-4 text-xs sm:grid-cols-4">
+        <div className="surface-well px-3 py-2"><div className="text-ink-3">Total Calls</div><div className="mt-1 font-semibold text-ink">{data.calls.length}</div></div>
+        <div className="surface-well px-3 py-2"><div className="text-ink-3">Total Puts</div><div className="mt-1 font-semibold text-ink">{data.puts.length}</div></div>
+        <div className="surface-well px-3 py-2"><div className="text-ink-3">ATM Strike</div><div className="mt-1 font-semibold text-ink">{atmStrike?.toLocaleString() ?? '--'}</div></div>
+        <div className="surface-well px-3 py-2"><div className="text-ink-3">Strikes</div><div className="mt-1 font-semibold text-ink">{sortedStrikes.length}</div></div>
       </div>
     </div>
   )

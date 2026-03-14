@@ -8,6 +8,7 @@ import { filterExpirations } from '@/lib/filterExpirations'
 import { apiPath, ssePath } from '@/lib/apiBase.js'
 import { EX_ACTIVE, EX_SOFT, EX_NAME } from '@/lib/exchangeColors'
 import { groupSurfaceBuckets } from '@/lib/surfaceGrouping.js'
+import { deriveCombinedAnalysis } from '@/lib/liveCombinedAnalysis.js'
 import {
   buildSkewChartData,
   buildTermStructureChartData,
@@ -27,11 +28,6 @@ import {
 
 const RESEARCH_EXCHANGES = ['combined', 'deribit', 'okx', 'bybit', 'binance'] as const
 const OVERLAY_EXCHANGES = ['deribit', 'okx', 'bybit', 'binance'] as const
-const OKX_FAMILY_MAP: Record<string, string> = {
-  BTC: 'BTC-USD',
-  ETH: 'ETH-USD',
-  SOL: 'SOL-USD',
-}
 const EXCHANGE_COLORS: Record<string, string> = {
   combined: '#71717a',
   deribit: '#2563eb',
@@ -74,8 +70,25 @@ type AnalysisPayload = {
   updatedAt: number
 }
 
-function coinForExchange(exchange: ResearchExchange, coin: 'BTC' | 'ETH' | 'SOL') {
-  return exchange === 'okx' ? OKX_FAMILY_MAP[coin] : coin
+type LiveFreshness = {
+  status: 'fresh' | 'aging' | 'stale' | 'missing'
+  ageMs: number | null
+  label: string
+}
+
+function getLiveStreamFreshness(updatedAt: number | null, now = Date.now()): LiveFreshness {
+  if (!updatedAt) {
+    return { status: 'missing', ageMs: null, label: 'Awaiting stream' }
+  }
+
+  const ageMs = Math.max(0, now - updatedAt)
+  if (ageMs <= 15_000) {
+    return { status: 'fresh', ageMs, label: 'Live' }
+  }
+  if (ageMs <= 45_000) {
+    return { status: 'aging', ageMs, label: 'Quiet' }
+  }
+  return { status: 'stale', ageMs, label: 'Disconnected' }
 }
 
 function buildSmileChartData(
@@ -168,20 +181,20 @@ export default function AnalysisPage() {
   const [optionsData, setOptionsData] = useState<OptionsData | null>(null)
   const [spotPrice, setSpotPrice] = useState<number>(0)
   const [loadingOptions, setLoadingOptions] = useState(false)
-  const [analysisByExchange, setAnalysisByExchange] = useState<Record<ResearchExchange, AnalysisPayload | null>>({
-    combined: null,
+  const [overlayAnalysisByExchange, setOverlayAnalysisByExchange] = useState<Record<OverlayExchange, AnalysisPayload | null>>({
     deribit: null,
     okx: null,
     bybit: null,
     binance: null,
   })
-  const [analysisErrors, setAnalysisErrors] = useState<Record<ResearchExchange, string | null>>({
-    combined: null,
+  const [overlayAnalysisErrors, setOverlayAnalysisErrors] = useState<Record<OverlayExchange, string | null>>({
     deribit: null,
     okx: null,
     bybit: null,
     binance: null,
   })
+  const [lastCombinedEventAt, setLastCombinedEventAt] = useState<number | null>(null)
+  const [freshnessNow, setFreshnessNow] = useState(() => Date.now())
   const [overlayVisibility, setOverlayVisibility] = useState<Record<OverlayExchange, boolean>>({
     deribit: true,
     okx: true,
@@ -198,10 +211,17 @@ export default function AnalysisPage() {
   const selectedExpirationRef = useRef('')
 
   useEffect(() => {
+    const id = window.setInterval(() => setFreshnessNow(Date.now()), 5000)
+    return () => window.clearInterval(id)
+  }, [])
+
+  useEffect(() => {
     fetchVersion.current++
     const version = fetchVersion.current
     setLoadingOptions(true)
     setOptionsData(null)
+    setSpotPrice(0)
+    setLastCombinedEventAt(null)
     setSelectedExpiration('')
     selectedExpirationRef.current = ''
 
@@ -247,6 +267,7 @@ export default function AnalysisPage() {
         })
 
         if (data.spotPrice > 0) setSpotPrice(data.spotPrice)
+        setLastCombinedEventAt(Date.now())
         setLoadingOptions(false)
 
         if (data.expirations?.length > 0 && !selectedExpirationRef.current) {
@@ -268,9 +289,9 @@ export default function AnalysisPage() {
     let cancelled = false
 
     async function fetchAllAnalysis() {
-      const results = await Promise.all(RESEARCH_EXCHANGES.map(async (exchange) => {
+      const results = await Promise.all(OVERLAY_EXCHANGES.map(async (exchange) => {
         try {
-          const response = await fetch(apiPath(`analysis/${exchange}/${coinForExchange(exchange, selectedCrypto)}`))
+          const response = await fetch(apiPath(`analysis/${exchange}/${selectedCrypto}`))
           const payload = await response.json().catch(() => ({}))
           if (!response.ok) {
             throw new Error(payload?.error || `HTTP ${response.status}`)
@@ -283,16 +304,16 @@ export default function AnalysisPage() {
 
       if (cancelled) return
 
-      const nextData = { combined: null, deribit: null, okx: null, bybit: null, binance: null } as Record<ResearchExchange, AnalysisPayload | null>
-      const nextErrors = { combined: null, deribit: null, okx: null, bybit: null, binance: null } as Record<ResearchExchange, string | null>
+      const nextData = { deribit: null, okx: null, bybit: null, binance: null } as Record<OverlayExchange, AnalysisPayload | null>
+      const nextErrors = { deribit: null, okx: null, bybit: null, binance: null } as Record<OverlayExchange, string | null>
 
       for (const [exchange, result] of results) {
         nextData[exchange] = result.data
         nextErrors[exchange] = result.error
       }
 
-      setAnalysisByExchange(nextData)
-      setAnalysisErrors(nextErrors)
+      setOverlayAnalysisByExchange(nextData)
+      setOverlayAnalysisErrors(nextErrors)
       setActiveSurfaceKey(null)
     }
 
@@ -310,7 +331,24 @@ export default function AnalysisPage() {
   )
 
   const visibleOverlays = OVERLAY_EXCHANGES.filter((exchange) => overlayVisibility[exchange])
-  const combinedAnalysis = analysisByExchange.combined
+  const combinedAnalysis = useMemo<AnalysisPayload | null>(
+    () => deriveCombinedAnalysis(optionsData, spotPrice || optionsData?.spotPrice || 0, lastCombinedEventAt ?? freshnessNow) as AnalysisPayload | null,
+    [optionsData, spotPrice, lastCombinedEventAt]
+  )
+  const analysisByExchange = useMemo<Record<ResearchExchange, AnalysisPayload | null>>(() => ({
+    combined: combinedAnalysis,
+    deribit: overlayAnalysisByExchange.deribit,
+    okx: overlayAnalysisByExchange.okx,
+    bybit: overlayAnalysisByExchange.bybit,
+    binance: overlayAnalysisByExchange.binance,
+  }), [combinedAnalysis, overlayAnalysisByExchange])
+  const analysisErrors = useMemo<Record<ResearchExchange, string | null>>(() => ({
+    combined: null,
+    deribit: overlayAnalysisErrors.deribit,
+    okx: overlayAnalysisErrors.okx,
+    bybit: overlayAnalysisErrors.bybit,
+    binance: overlayAnalysisErrors.binance,
+  }), [overlayAnalysisErrors])
   const smileChartData = useMemo(
     () => buildSmileChartData(selectedExpiration, optionsData, spotPrice, analysisByExchange, visibleOverlays),
     [selectedExpiration, optionsData, spotPrice, analysisByExchange, visibleOverlays]
@@ -392,10 +430,12 @@ export default function AnalysisPage() {
 
   const freshnessByExchange = useMemo(() => {
     return RESEARCH_EXCHANGES.reduce((acc, exchange) => {
-      acc[exchange] = getDatasetFreshness(analysisByExchange[exchange]?.updatedAt ?? null)
+      acc[exchange] = exchange === 'combined'
+        ? getLiveStreamFreshness(lastCombinedEventAt, freshnessNow)
+        : getDatasetFreshness(analysisByExchange[exchange]?.updatedAt ?? null, freshnessNow)
       return acc
-    }, {} as Record<ResearchExchange, ReturnType<typeof getDatasetFreshness>>)
-  }, [analysisByExchange])
+    }, {} as Record<ResearchExchange, LiveFreshness | ReturnType<typeof getDatasetFreshness>>)
+  }, [analysisByExchange, lastCombinedEventAt, freshnessNow])
 
   const surfaceValueRange = useMemo(() => {
     // Anchor to the combined backend surface so toggling individual exchanges
@@ -441,12 +481,13 @@ export default function AnalysisPage() {
     <div className="min-h-screen bg-surface">
       <Header exchange="combined" onExchangeChange={() => {}} hideExchangeSelector />
 
-      <main className="container mx-auto px-4 py-4 space-y-4">
-        <div className="card space-y-4">
+      <main className="container mx-auto px-4 py-5 space-y-4">
+        <div className="surface-band space-y-4 px-5 py-5">
           <div className="flex items-start justify-between gap-4 flex-wrap">
             <div>
-              <h1 className="text-sm font-semibold text-ink">Volatility Research Dashboard</h1>
-              <p className="text-xs text-ink-3 mt-1">
+              <div className="text-[11px] uppercase tracking-[0.2em] text-ink-3">Comparative research</div>
+              <h1 className="heading-serif mt-2 text-3xl font-semibold text-ink">Volatility research dashboard</h1>
+              <p className="mt-2 max-w-3xl text-sm text-ink-2">
                 Combined is the market anchor. Use venue overlays to compare smile, tenor, skew, and surface dislocations.
               </p>
             </div>
