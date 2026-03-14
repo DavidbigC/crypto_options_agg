@@ -47,6 +47,8 @@ import { getRuntimeConfig, isCorsOriginAllowed } from './lib/runtime-config.js'
 import { registerOptionalRoutes } from './lib/optional-routes.js'
 import { createRateLimiter } from './lib/rate-limit.js'
 import { createPolymarketSurfaceBroadcaster } from './lib/polymarket-sse.js'
+import { attachSseLease } from './lib/sse-lease.js'
+import { isValidStreamCoin } from './lib/stream-params.js'
 
 
 const backendDir = path.dirname(fileURLToPath(import.meta.url))
@@ -211,7 +213,7 @@ const polymarketSurfaceBroadcaster = createPolymarketSurfaceBroadcaster({
 })
 
 const VALID_EXCHANGES = new Set(['bybit', 'okx', 'deribit', 'derive', 'binance', 'combined'])
-const VALID_COINS     = new Set(['BTC', 'ETH', 'SOL'])
+const SSE_LEASE_MS = 30 * 60 * 1000
 
 // Filter full response down to a single expiry's data (keeps metadata intact).
 // Reduces payload from ~220KB to ~30KB when a client is watching one expiry.
@@ -930,9 +932,14 @@ app.get('/api/stream/polymarket/:asset', async (req, res) => {
   sseClients.get(key).set(res, { spotPrice })
 
   const heartbeat = setInterval(() => res.write(': ping\n\n'), 5_000)
-  req.on('close', () => {
-    clearInterval(heartbeat)
-    sseClients.get(key)?.delete(res)
+  attachSseLease({
+    req,
+    res,
+    leaseMs: SSE_LEASE_MS,
+    onCleanup() {
+      clearInterval(heartbeat)
+      sseClients.get(key)?.delete(res)
+    },
   })
 })
 
@@ -946,7 +953,7 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
   if (!VALID_EXCHANGES.has(exchange)) {
     return res.status(400).json({ error: `Unknown exchange: ${exchange}` })
   }
-  if (!VALID_COINS.has(coin)) {
+  if (!isValidStreamCoin(exchange, coin)) {
     return res.status(400).json({ error: `Unknown coin: ${coin}` })
   }
 
@@ -973,10 +980,14 @@ app.get('/api/stream/:exchange/:coin', (req, res) => {
   sseClients.get(key).set(res, { expiry })
 
   const heartbeat = setInterval(() => res.write(': ping\n\n'), 5_000)
-
-  req.on('close', () => {
-    clearInterval(heartbeat)
-    sseClients.get(key)?.delete(res)
+  attachSseLease({
+    req,
+    res,
+    leaseMs: SSE_LEASE_MS,
+    onCleanup() {
+      clearInterval(heartbeat)
+      sseClients.get(key)?.delete(res)
+    },
   })
 })
 

@@ -16,13 +16,19 @@ pub async fn handler(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
     let exchange = exchange.to_lowercase();
-    let coin     = coin.to_uppercase();
+    let coin = coin.to_uppercase();
 
-    if !VALID_EXCHANGES.contains(&exchange.as_str()) { return Err(StatusCode::BAD_REQUEST); }
-    if !VALID_COINS.contains(&coin.as_str())         { return Err(StatusCode::BAD_REQUEST); }
+    if !VALID_EXCHANGES.contains(&exchange.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !VALID_COINS.contains(&coin.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     // OKX uses instFamily format; SOL is not supported on OKX
-    if exchange == "okx" && coin == "SOL" { return Err(StatusCode::BAD_REQUEST); }
+    if exchange == "okx" && coin == "SOL" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let cache_key = format!("{}:{}", exchange, coin);
     let now_ms = std::time::SystemTime::now()
@@ -45,48 +51,53 @@ pub async fn handler(
     let exchange_response = match exchange.as_str() {
         "bybit" => {
             let ticker = state.bybit_ticker.read().await;
-            let spot   = state.bybit_spot.read().await;
+            let spot = state.bybit_spot.read().await;
             let resp = exchanges::bybit::build_response(&ticker, &spot, &coin);
-            drop(ticker); drop(spot);
+            drop(ticker);
+            drop(spot);
             resp
         }
         "okx" => {
             let inst_family = format!("{}-USD", coin);
             let greeks = state.okx_greeks.read().await;
             let ticker = state.okx_ticker.read().await;
-            let spot   = state.okx_spot.read().await;
+            let spot = state.okx_spot.read().await;
             let resp = exchanges::okx::build_response(&greeks, &ticker, &spot, &inst_family);
-            drop(greeks); drop(ticker); drop(spot);
+            drop(greeks);
+            drop(ticker);
+            drop(spot);
             resp
         }
         "deribit" => {
             let deribit = state.deribit.read().await;
-            let greeks  = state.deribit_greeks.read().await;
+            let greeks = state.deribit_greeks.read().await;
             let resp = exchanges::deribit::build_response(&deribit, &greeks, &coin)
                 .unwrap_or(serde_json::Value::Null);
-            drop(deribit); drop(greeks);
+            drop(deribit);
+            drop(greeks);
             resp
         }
         "derive" => {
             let tickers = state.derive_tickers.read().await;
-            let spot    = state.derive_spot.read().await;
+            let spot = state.derive_spot.read().await;
             let resp = exchanges::derive::build_response(&tickers, &spot, &coin)
                 .unwrap_or(serde_json::Value::Null);
-            drop(tickers); drop(spot);
+            drop(tickers);
+            drop(spot);
             resp
         }
         "binance" => {
             let cache = state.binance.read().await;
-            let spot  = state.binance_spot.read().await;
+            let spot = state.binance_spot.read().await;
             let resp = exchanges::binance::build_response(&cache, &spot, &coin)
                 .unwrap_or(serde_json::Value::Null);
-            drop(cache); drop(spot);
+            drop(cache);
+            drop(spot);
             resp
         }
-        "combined" => {
-            exchanges::combined::build_combined_response(&state, &coin).await
-                .unwrap_or(serde_json::Value::Null)
-        }
+        "combined" => exchanges::combined::build_combined_response(&state, &coin)
+            .await
+            .unwrap_or(serde_json::Value::Null),
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
@@ -98,7 +109,11 @@ pub async fn handler(
     let result = analysis::compute_analysis(&exchange_response, spot)
         .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
 
-    state.analysis.write().await.insert(cache_key, result.clone());
+    state
+        .analysis
+        .write()
+        .await
+        .insert(cache_key, result.clone());
 
     Ok(Json(result))
 }

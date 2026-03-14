@@ -20,6 +20,9 @@ import {
   sortPositionsByNotional,
 } from '@/lib/portfolio'
 import { filterVisibleBalances } from '@/lib/portfolioBalances.js'
+import { fetchJsonOrThrow } from '@/lib/fetchJson.js'
+import { requirePortfolioPayload } from '@/lib/portfolioApi.js'
+import { getPortfolioDisplayData } from '@/lib/portfolioDisplay.js'
 import { clearImportedExchangeLegs, mergeImportedExchangeLegs } from '@/lib/mixedSimulator.js'
 import { apiPath } from '@/lib/apiBase.js'
 
@@ -84,12 +87,13 @@ export default function PortfolioPageClient() {
 
     try {
       const response = await fetch(PORTFOLIO_API_URL[exchange])
-      const payload = await response.json()
-      if (!response.ok) {
-        throw new Error(payload?.error || `Failed to load ${EXCHANGE_LABEL[exchange]} portfolio`)
-      }
+      const payload = await fetchJsonOrThrow(
+        response,
+        `Failed to load ${EXCHANGE_LABEL[exchange]} portfolio`,
+      )
+      const portfolio = requirePortfolioPayload(payload, EXCHANGE_LABEL[exchange])
 
-      setPortfolios((prev) => ({ ...prev, [exchange]: payload }))
+      setPortfolios((prev) => ({ ...prev, [exchange]: portfolio }))
       setErrors((prev) => ({ ...prev, [exchange]: null }))
     } catch (err) {
       setPortfolios((prev) => ({ ...prev, [exchange]: null }))
@@ -392,6 +396,7 @@ function PortfolioExchangeCard({
   onUseForSimulator: () => void
 }) {
   const visibleBalances: PortfolioBalance[] = portfolio ? filterVisibleBalances(portfolio.balances) : []
+  const display = getPortfolioDisplayData(portfolio, EXCHANGE_LABEL[exchange])
 
   return (
     <section className={`bg-card border border-rim border-l-4 ${EXCHANGE_ACCENT[exchange]} rounded-lg p-4 space-y-3 shadow-sm`}>
@@ -419,16 +424,16 @@ function PortfolioExchangeCard({
         <>
           <dl className="flex flex-wrap gap-x-5 gap-y-1 border-t border-rim pt-2.5">
             {([
-              ['Exchange', portfolio.exchange.toUpperCase()],
-              ['Account', portfolio.account.label || EXCHANGE_LABEL[exchange]],
-              ['Permission', portfolio.account.permission || 'unknown'],
-              ['Total Equity', formatUsd(portfolio.summary.totalEquityUsd)],
-              ['Available', formatUsd(portfolio.summary.availableEquityUsd)],
-              ['Derivatives', String(portfolio.summary.derivativesCount)],
-              ['Open Positions', String(portfolio.summary.openPositions)],
+              ['Exchange', display.exchangeName],
+              ['Account', display.accountLabel],
+              ['Permission', display.permission],
+              ['Total Equity', formatUsd(display.totalEquityUsd)],
+              ['Available', formatUsd(display.availableEquityUsd)],
+              ['Derivatives', String(display.derivativesCount)],
+              ['Open Positions', String(display.openPositions)],
               ['Balances', String(visibleBalances.length)],
-              ['Settle', portfolio.account.settleCurrency || 'N/A'],
-              ['Updated', formatTimestamp(portfolio.summary.updatedAt)],
+              ['Settle', display.settleCurrency],
+              ['Updated', formatTimestamp(display.updatedAt)],
             ] as [string, string][]).map(([label, value]) => (
               <div key={label} className="flex items-baseline gap-1">
                 <dt className="text-xs text-ink-3">{label}:</dt>
@@ -442,10 +447,10 @@ function PortfolioExchangeCard({
               <span className="text-xs font-semibold text-ink-3 uppercase tracking-wider">Greeks</span>
               <div className="flex gap-5 flex-wrap">
                 {([
-                  ['Δ', formatNumber(portfolio.greeks.total.delta, 3)],
-                  ['Γ', formatNumber(portfolio.greeks.total.gamma, 5)],
-                  ['Θ', formatNumber(portfolio.greeks.total.theta, 3)],
-                  ['Ψ', formatNumber(portfolio.greeks.total.vega, 3)],
+                  ['Δ', formatNumber(display.totalGreeks.delta, 3)],
+                  ['Γ', formatNumber(display.totalGreeks.gamma, 5)],
+                  ['Θ', formatNumber(display.totalGreeks.theta, 3)],
+                  ['Ψ', formatNumber(display.totalGreeks.vega, 3)],
                 ] as [string, string][]).map(([sym, val]) => (
                   <span key={sym} className="flex items-baseline gap-0.5">
                     <span className="text-xs text-ink-3 font-medium">{sym}</span>
@@ -467,7 +472,7 @@ function PortfolioExchangeCard({
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(portfolio.greeks.byCoin).map(([coin, greeks]) => (
+                  {Object.entries(display.greeksByCoin).map(([coin, greeks]) => (
                     <tr key={coin} className="border-b border-rim last:border-b-0">
                       <td className="table-cell font-medium text-ink">{coin}</td>
                       <td className="table-cell text-right">{formatNumber(greeks.delta, 3)}</td>
@@ -522,7 +527,7 @@ function PortfolioExchangeCard({
             <h3 className="text-xs font-semibold text-ink-3 uppercase tracking-wider">
               Open Positions <span className="normal-case font-normal text-ink-3">— live normalized derivatives from {EXCHANGE_LABEL[exchange]}</span>
             </h3>
-            {portfolio.positions.length === 0 ? (
+            {display.positions.length === 0 ? (
               <p className="text-xs text-ink-2">No open positions.</p>
             ) : (
               <CompactTable>
@@ -545,7 +550,7 @@ function PortfolioExchangeCard({
                     </tr>
                   </thead>
                   <tbody>
-                    {sortPositionsByNotional(portfolio.positions).map((position) => (
+                    {sortPositionsByNotional(display.positions).map((position) => (
                       <tr key={`${position.instrument}-${position.marginMode}-${position.size}`} className="border-b border-rim last:border-b-0">
                         <td className="table-cell font-medium text-ink">{position.instrument}</td>
                         <td className="table-cell">{position.coin}</td>

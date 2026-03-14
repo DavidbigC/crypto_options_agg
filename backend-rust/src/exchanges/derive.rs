@@ -15,6 +15,7 @@ const FAST_EXPIRIES: usize = 4;
 const SUPPORTED_CURRENCIES: &[&str] = &["BTC", "ETH"];
 
 pub fn start(state: Arc<AppState>, client: reqwest::Client) {
+    let flush_state = state.clone();
     tokio::spawn(async move {
         let mut backoff = 2u64;
         // instruments_cache survives reconnects
@@ -36,7 +37,37 @@ pub fn start(state: Arc<AppState>, client: reqwest::Client) {
         }
     });
 
-    tracing::info!("Derive WS started");
+    // Throttled broadcast flush: every 200ms, broadcast if dirty
+    {
+        let state = flush_state;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_millis(200));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                for currency in SUPPORTED_CURRENCIES {
+                    if let Some(flag) = state.derive_dirty.get(currency) {
+                        if flag.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                            let payload = {
+                                let tickers = state.derive_tickers.read().await;
+                                let spot = state.derive_spot.read().await;
+                                build_response(&tickers, &spot, currency)
+                            };
+                            if let Some(p) = payload {
+                                let key = format!("derive:{}", currency);
+                                crate::sse::broadcast(&state.sse_senders, &key, p.to_string())
+                                    .await;
+                                crate::exchanges::combined::broadcast_update(&state, currency)
+                                    .await;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    tracing::info!("Derive WS started (broadcast throttled to 200ms)");
 }
 
 async fn run_ws(
@@ -58,7 +89,11 @@ async fn run_ws(
         if !instruments_cache.contains_key(&currency) {
             match fetch_instruments(client, &currency).await {
                 Ok(names) => {
-                    tracing::info!("Derive: fetched {} instruments for {}", names.len(), currency);
+                    tracing::info!(
+                        "Derive: fetched {} instruments for {}",
+                        names.len(),
+                        currency
+                    );
                     instruments_cache.insert(currency.clone(), names);
                 }
                 Err(e) => {
@@ -88,7 +123,9 @@ async fn run_ws(
         // Bootstrap tickers if cache is cold for this currency
         {
             let ticker_cache = state.derive_tickers.read().await;
-            let cache_hit = ticker_cache.keys().any(|k| k.starts_with(&format!("{}-", currency)));
+            let cache_hit = ticker_cache
+                .keys()
+                .any(|k| k.starts_with(&format!("{}-", currency)));
             drop(ticker_cache);
             if !cache_hit {
                 if let Err(e) = bootstrap_tickers(state, client, &currency, &names).await {
@@ -103,7 +140,10 @@ async fn run_ws(
                 .iter()
                 .filter_map(|n| {
                     let parts: Vec<&str> = n.split('-').collect();
-                    if parts.len() >= 4 && parts[1].len() == 8 && parts[1].chars().all(|c| c.is_ascii_digit()) {
+                    if parts.len() >= 4
+                        && parts[1].len() == 8
+                        && parts[1].chars().all(|c| c.is_ascii_digit())
+                    {
                         Some(parts[1].to_string())
                     } else {
                         None
@@ -116,7 +156,11 @@ async fn run_ws(
             set
         };
 
-        let fast_set: HashSet<&str> = expiries.iter().take(FAST_EXPIRIES).map(|s| s.as_str()).collect();
+        let fast_set: HashSet<&str> = expiries
+            .iter()
+            .take(FAST_EXPIRIES)
+            .map(|s| s.as_str())
+            .collect();
 
         let all_channels: Vec<String> = names
             .iter()
@@ -130,14 +174,19 @@ async fn run_ws(
             })
             .collect();
 
-        let fast_count = names.iter().filter(|n| {
-            let expiry = n.split('-').nth(1).unwrap_or("");
-            fast_set.contains(expiry)
-        }).count();
+        let fast_count = names
+            .iter()
+            .filter(|n| {
+                let expiry = n.split('-').nth(1).unwrap_or("");
+                fast_set.contains(expiry)
+            })
+            .count();
         let slow_count = names.len() - fast_count;
         tracing::info!(
             "Derive WS: subscribing {} — {} fast (100ms) + {} slow (1000ms)",
-            currency, fast_count, slow_count
+            currency,
+            fast_count,
+            slow_count
         );
 
         // Send in chunks of 200
@@ -223,11 +272,7 @@ async fn fetch_instruments(client: &reqwest::Client, currency: &str) -> Result<V
     Ok(names)
 }
 
-async fn bootstrap_spot(
-    state: &AppState,
-    client: &reqwest::Client,
-    currency: &str,
-) -> Result<()> {
+async fn bootstrap_spot(state: &AppState, client: &reqwest::Client, currency: &str) -> Result<()> {
     let body: Value = client
         .post(format!("{}/public/get_ticker", DERIVE_REST))
         .header("Content-Type", "application/json")
@@ -238,10 +283,8 @@ async fn bootstrap_spot(
         .json()
         .await?;
 
-    let price = body["result"]["index_price"]
-        .as_f64()
-        .or_else(|| body["result"]["mark_price"].as_f64())
-        .unwrap_or(0.0);
+    let price = parse_f64_value(&body["result"]["index_price"])
+        .max(parse_f64_value(&body["result"]["mark_price"]));
 
     if price > 0.0 {
         let mut spot_cache = state.derive_spot.write().await;
@@ -250,6 +293,44 @@ async fn bootstrap_spot(
     }
 
     Ok(())
+}
+
+fn parse_f64_value(value: &Value) -> f64 {
+    match value {
+        Value::String(s) => s.parse::<f64>().unwrap_or(0.0),
+        Value::Number(n) => n.as_f64().unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
+fn has_contract_signal(
+    bid: f64,
+    ask: f64,
+    last: f64,
+    mark_price: f64,
+    volume: f64,
+    open_interest: f64,
+    bid_size: f64,
+    ask_size: f64,
+    delta: f64,
+    gamma: f64,
+    theta: f64,
+    vega: f64,
+    iv: f64,
+) -> bool {
+    bid > 0.0
+        || ask > 0.0
+        || last > 0.0
+        || mark_price > 0.0
+        || volume > 0.0
+        || open_interest > 0.0
+        || bid_size > 0.0
+        || ask_size > 0.0
+        || delta != 0.0
+        || gamma != 0.0
+        || theta != 0.0
+        || vega != 0.0
+        || iv > 0.0
 }
 
 async fn bootstrap_tickers(
@@ -292,12 +373,21 @@ async fn bootstrap_tickers(
                 }
             }
             Err(e) => {
-                tracing::error!("Derive bootstrap tickers error ({} {}): {}", currency, expiry_date, e);
+                tracing::error!(
+                    "Derive bootstrap tickers error ({} {}): {}",
+                    currency,
+                    expiry_date,
+                    e
+                );
             }
         }
     }
 
-    tracing::info!("Derive bootstrap done ({}): {} instruments cached", currency, total);
+    tracing::info!(
+        "Derive bootstrap done ({}): {} instruments cached",
+        currency,
+        total
+    );
     Ok(())
 }
 
@@ -338,7 +428,7 @@ async fn handle_ws_message(state: &AppState, msg: &Value) {
     // Update spot from index price field "I"
     let index_price = instrument_ticker
         .get("I")
-        .and_then(|v| v.as_f64())
+        .map(parse_f64_value)
         .unwrap_or(0.0);
     if index_price > 0.0 {
         let mut spot_cache = state.derive_spot.write().await;
@@ -351,15 +441,9 @@ async fn handle_ws_message(state: &AppState, msg: &Value) {
         ticker_cache.insert(instrument.clone(), Value::Object(instrument_ticker));
     }
 
-    // Build and broadcast SSE
-    let payload = {
-        let tickers = state.derive_tickers.read().await;
-        let spot = state.derive_spot.read().await;
-        build_response(&tickers, &spot, &currency)
-    };
-    if let Some(p) = payload {
-        let key = format!("derive:{}", currency);
-        crate::sse::broadcast(&state.sse_senders, &key, p.to_string()).await;
+    // Mark dirty for throttled broadcast (flush task handles actual broadcast)
+    if let Some(flag) = state.derive_dirty.get(currency.as_str()) {
+        flag.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -408,23 +492,39 @@ pub fn build_response(
             None => continue,
         };
 
-        let bid = ticker["b"].as_f64().unwrap_or(0.0);
-        let ask = ticker["a"].as_f64().unwrap_or(0.0);
-        let last = ticker["f"].as_f64().unwrap_or(0.0);
-        let bid_size = ticker["B"].as_f64().unwrap_or(0.0);
-        let ask_size = ticker["A"].as_f64().unwrap_or(0.0);
-        let mark_price = ticker["option_pricing"]["m"]
-            .as_f64()
-            .or_else(|| ticker["M"].as_f64())
-            .unwrap_or(0.0);
+        let bid = parse_f64_value(&ticker["b"]);
+        let ask = parse_f64_value(&ticker["a"]);
+        let last = parse_f64_value(&ticker["f"]);
+        let bid_size = parse_f64_value(&ticker["B"]);
+        let ask_size = parse_f64_value(&ticker["A"]);
+        let mark_price = parse_f64_value(&ticker["option_pricing"]["m"])
+            .max(parse_f64_value(&ticker["M"]));
 
-        let delta = ticker["option_pricing"]["d"].as_f64().unwrap_or(0.0);
-        let gamma = ticker["option_pricing"]["g"].as_f64().unwrap_or(0.0);
-        let theta = ticker["option_pricing"]["t"].as_f64().unwrap_or(0.0);
-        let vega = ticker["option_pricing"]["v"].as_f64().unwrap_or(0.0);
-        let iv = ticker["option_pricing"]["i"].as_f64().unwrap_or(0.0); // already decimal
-        let volume = ticker["stats"]["v"].as_f64().unwrap_or(0.0);
-        let open_interest = ticker["stats"]["oi"].as_f64().unwrap_or(0.0);
+        let delta = parse_f64_value(&ticker["option_pricing"]["d"]);
+        let gamma = parse_f64_value(&ticker["option_pricing"]["g"]);
+        let theta = parse_f64_value(&ticker["option_pricing"]["t"]);
+        let vega = parse_f64_value(&ticker["option_pricing"]["v"]);
+        let iv = parse_f64_value(&ticker["option_pricing"]["i"]);
+        let volume = parse_f64_value(&ticker["stats"]["v"]);
+        let open_interest = parse_f64_value(&ticker["stats"]["oi"]);
+
+        if !has_contract_signal(
+            bid,
+            ask,
+            last,
+            mark_price,
+            volume,
+            open_interest,
+            bid_size,
+            ask_size,
+            delta,
+            gamma,
+            theta,
+            vega,
+            iv,
+        ) {
+            continue;
+        }
 
         let contract = json!({
             "symbol":            name,
@@ -446,7 +546,9 @@ pub fn build_response(
             "markVol":           iv,
         });
 
-        let entry = options_by_date.entry(expiry).or_insert_with(|| (vec![], vec![]));
+        let entry = options_by_date
+            .entry(expiry)
+            .or_insert_with(|| (vec![], vec![]));
         if option_type == "call" {
             entry.0.push(contract);
         } else {
@@ -485,4 +587,56 @@ pub fn build_response(
         "expirationCounts": expiration_counts,
         "data": data_obj,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_response;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    #[test]
+    fn build_response_parses_string_encoded_derive_fields() {
+        let mut tickers = HashMap::new();
+        tickers.insert(
+            "BTC-20260314-70000-C".to_string(),
+            json!({
+                "b": "120.5",
+                "a": "130.5",
+                "f": "126.0",
+                "B": "1.2",
+                "A": "2.3",
+                "M": "127.0",
+                "option_pricing": {
+                    "m": "127.1",
+                    "d": "0.52",
+                    "g": "0.0004",
+                    "t": "-12.5",
+                    "v": "45.2",
+                    "i": "0.61"
+                },
+                "stats": {
+                    "v": "15.5",
+                    "oi": "80.25"
+                }
+            }),
+        );
+
+        let mut spot = HashMap::new();
+        spot.insert("BTC".to_string(), 71234.5);
+
+        let response = build_response(&tickers, &spot, "BTC").expect("derive response");
+        let contract = &response["data"]["2026-03-14"]["calls"][0];
+
+        assert_eq!(response["spotPrice"], json!(71234.5));
+        assert_eq!(contract["bid"], json!(120.5));
+        assert_eq!(contract["ask"], json!(130.5));
+        assert_eq!(contract["markPrice"], json!(127.1));
+        assert_eq!(contract["delta"], json!(0.52));
+        assert_eq!(contract["gamma"], json!(0.0004));
+        assert_eq!(contract["theta"], json!(-12.5));
+        assert_eq!(contract["vega"], json!(45.2));
+        assert_eq!(contract["markVol"], json!(0.61));
+        assert_eq!(contract["openInterest"], json!(80.25));
+    }
 }

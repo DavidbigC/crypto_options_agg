@@ -27,6 +27,13 @@ pub async fn options_chain(
     Ok(Json(data))
 }
 
+pub async fn snapshot(
+    State(state): State<Arc<AppState>>,
+    Path(base_coin): Path<String>,
+) -> Result<Json<Value>, (StatusCode, Json<Value>)> {
+    options_chain(State(state), Path(base_coin)).await
+}
+
 pub async fn options_chain_expiry(
     State(state): State<Arc<AppState>>,
     Path((base_coin, expiration)): Path<(String, String)>,
@@ -50,7 +57,9 @@ pub async fn options_chain_expiry(
         None => {
             return Err((
                 StatusCode::NOT_FOUND,
-                Json(json!({ "error": format!("No data found for {} expiration {}", coin, expiration) })),
+                Json(
+                    json!({ "error": format!("No data found for {} expiration {}", coin, expiration) }),
+                ),
             ));
         }
     };
@@ -73,7 +82,10 @@ pub async fn options_chain_expiry(
             }
         }
     }
-    let strikes: Vec<f64> = strikes_set.iter().map(|&bits| f64::from_bits(bits)).collect();
+    let strikes: Vec<f64> = strikes_set
+        .iter()
+        .map(|&bits| f64::from_bits(bits))
+        .collect();
 
     // ATM strike: closest to spot
     let atm_strike = strikes
@@ -125,9 +137,7 @@ pub async fn options_chain_expiry(
     })))
 }
 
-pub async fn spots(
-    State(state): State<Arc<AppState>>,
-) -> Json<Value> {
+pub async fn spots(State(state): State<Arc<AppState>>) -> Json<Value> {
     let spot_cache = state.bybit_spot.read().await;
     Json(json!({
         "BTCUSDT": spot_cache.get("BTC").copied().unwrap_or(0.0),
@@ -143,9 +153,7 @@ pub async fn spot_single(
     let spot_cache = state.bybit_spot.read().await;
     // symbol is like "BTCUSDT" — map to coin key
     let coin = symbol_to_coin(&symbol);
-    let price = coin
-        .and_then(|c| spot_cache.get(c).copied())
-        .unwrap_or(0.0);
+    let price = coin.and_then(|c| spot_cache.get(c).copied()).unwrap_or(0.0);
     Json(json!({ "symbol": symbol, "price": price }))
 }
 
@@ -163,7 +171,7 @@ pub async fn debug_bybit(
     let expiry = query.expiry.as_deref();
 
     let ticker_cache = state.bybit_ticker.read().await;
-    let spot_cache   = state.bybit_spot.read().await;
+    let spot_cache = state.bybit_spot.read().await;
 
     let coin_cache = ticker_cache.get(&coin);
     let symbols: Vec<&String> = coin_cache.map(|m| m.keys().collect()).unwrap_or_default();
@@ -187,7 +195,10 @@ pub async fn debug_bybit(
     let sse_key = format!("bybit:{}", coin);
     let sse_count = {
         let senders = state.sse_senders.read().await;
-        senders.get(&sse_key).map(|tx| tx.receiver_count()).unwrap_or(0)
+        senders
+            .get(&sse_key)
+            .map(|tx| tx.receiver_count())
+            .unwrap_or(0)
     };
 
     let mut resp = json!({
@@ -200,12 +211,19 @@ pub async fn debug_bybit(
     });
 
     if let Some(exp) = expiry {
-        let symbols_for_expiry: Vec<&String> = symbols.iter()
+        let symbols_for_expiry: Vec<&String> = symbols
+            .iter()
             .copied()
-            .filter(|s| parse_symbol(s).map(|p| p.expiry_date == exp).unwrap_or(false))
+            .filter(|s| {
+                parse_symbol(s)
+                    .map(|p| p.expiry_date == exp)
+                    .unwrap_or(false)
+            })
             .collect();
         let sample_symbols: Vec<&String> = symbols_for_expiry.iter().copied().take(3).collect();
-        let sample_data: Vec<Value> = symbols_for_expiry.iter().take(2)
+        let sample_data: Vec<Value> = symbols_for_expiry
+            .iter()
+            .take(2)
             .filter_map(|s| coin_cache.and_then(|m| m.get(*s)).cloned())
             .collect();
         let resp_obj = resp.as_object_mut().unwrap();
@@ -230,4 +248,82 @@ fn symbol_to_coin(symbol: &str) -> Option<&'static str> {
 // BTreeSet requires Ord; use bit representation for f64 ordering (values are positive strikes)
 fn ordered_float(f: f64) -> u64 {
     f.to_bits()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::snapshot;
+    use crate::state::AppState;
+    use axum::{
+        extract::{Path, State},
+        Json,
+    };
+    use serde_json::json;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn snapshot_returns_same_payload_shape_as_bybit_snapshot_route() {
+        let state = Arc::new(AppState::new());
+        {
+            let mut ticker = state.bybit_ticker.write().await;
+            ticker.insert(
+                "BTC".to_string(),
+                [(
+                    "BTC-28MAR26-100000-C".to_string(),
+                    json!({
+                        "symbol": "BTC-28MAR26-100000-C",
+                        "bid1Price": "12.5",
+                        "ask1Price": "13.5",
+                        "lastPrice": "13.0",
+                        "volume24h": "42",
+                        "bid1Size": "1",
+                        "ask1Size": "2",
+                        "delta": "0.5",
+                        "gamma": "0.01",
+                        "theta": "-5",
+                        "vega": "100",
+                        "impliedVolatility": "0.6",
+                        "bid1Iv": "0.58",
+                        "ask1Iv": "0.62",
+                        "openInterest": "99",
+                        "markPrice": "13.1",
+                        "underlyingPrice": "100500",
+                    }),
+                )]
+                .into_iter()
+                .collect(),
+            );
+        }
+        {
+            let mut spot = state.bybit_spot.write().await;
+            spot.insert("BTC".to_string(), 100000.0);
+        }
+
+        let Json(payload) = snapshot(State(state), Path("BTC".to_string()))
+            .await
+            .unwrap();
+
+        assert_eq!(payload["spotPrice"], json!(100000.0));
+        assert_eq!(payload["expirations"], json!(["2026-03-28"]));
+        assert_eq!(
+            payload["data"]["2026-03-28"]["calls"][0]["optionType"],
+            json!("call")
+        );
+        assert_eq!(
+            payload["data"]["2026-03-28"]["calls"][0]["markVol"],
+            json!(0.6)
+        );
+        assert_eq!(
+            payload["data"]["2026-03-28"]["calls"][0]["bidVol"],
+            json!(0.58)
+        );
+        assert_eq!(
+            payload["data"]["2026-03-28"]["calls"][0]["askVol"],
+            json!(0.62)
+        );
+        assert_eq!(
+            payload["data"]["2026-03-28"]["forwardPrice"],
+            json!(100500.0)
+        );
+    }
 }

@@ -494,10 +494,7 @@ fn compute_rebalancing_note(net_greeks: &NetGreeks, legs: &[Leg], spot_price: f6
         ));
     }
 
-    let option_legs: Vec<&Leg> = legs
-        .iter()
-        .filter(|l| l.leg_type != "future")
-        .collect();
+    let option_legs: Vec<&Leg> = legs.iter().filter(|l| l.leg_type != "future").collect();
     if !option_legs.is_empty() {
         let days_left: Vec<f64> = option_legs
             .iter()
@@ -587,177 +584,252 @@ fn enum_single_expiry(
     };
 
     if max_legs >= 2 {
-        add("Straddle", &[
-            leg!("buy", "call", b.atm, expiry, 1.0),
-            leg!("buy", "put", b.atm, expiry, 1.0),
-        ]);
+        add(
+            "Straddle",
+            &[
+                leg!("buy", "call", b.atm, expiry, 1.0),
+                leg!("buy", "put", b.atm, expiry, 1.0),
+            ],
+        );
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_put1 - b.atm).abs() > 0.001 {
-            add("Strangle", &[
-                leg!("buy", "call", b.otm_call1, expiry, 1.0),
-                leg!("buy", "put", b.otm_put1, expiry, 1.0),
-            ]);
+            add(
+                "Strangle",
+                &[
+                    leg!("buy", "call", b.otm_call1, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put1, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call2 - b.otm_call1).abs() > 0.001 {
-            add("Wide Strangle", &[
-                leg!("buy", "call", b.otm_call2, expiry, 1.0),
-                leg!("buy", "put", b.otm_put2, expiry, 1.0),
-            ]);
+            add(
+                "Wide Strangle",
+                &[
+                    leg!("buy", "call", b.otm_call2, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put2, expiry, 1.0),
+                ],
+            );
         }
 
-        add("Short Straddle", &[
-            leg!("sell", "call", b.atm, expiry, 1.0),
-            leg!("sell", "put", b.atm, expiry, 1.0),
-        ]);
+        add(
+            "Short Straddle",
+            &[
+                leg!("sell", "call", b.atm, expiry, 1.0),
+                leg!("sell", "put", b.atm, expiry, 1.0),
+            ],
+        );
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_put1 - b.atm).abs() > 0.001 {
-            add("Short Strangle", &[
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-            ]);
+            add(
+                "Short Strangle",
+                &[
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001 {
-            add("Bull Call Spread", &[
-                leg!("buy", "call", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-            ]);
-            add("Bear Call Spread", &[
-                leg!("sell", "call", b.atm, expiry, 1.0),
-                leg!("buy", "call", b.otm_call1, expiry, 1.0),
-            ]);
+            add(
+                "Bull Call Spread",
+                &[
+                    leg!("buy", "call", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                ],
+            );
+            add(
+                "Bear Call Spread",
+                &[
+                    leg!("sell", "call", b.atm, expiry, 1.0),
+                    leg!("buy", "call", b.otm_call1, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_put1 - b.atm).abs() > 0.001 {
-            add("Bear Put Spread", &[
-                leg!("buy", "put", b.atm, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-            ]);
-            add("Bull Put Spread", &[
-                leg!("sell", "put", b.atm, expiry, 1.0),
-                leg!("buy", "put", b.otm_put1, expiry, 1.0),
-            ]);
+            add(
+                "Bear Put Spread",
+                &[
+                    leg!("buy", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                ],
+            );
+            add(
+                "Bull Put Spread",
+                &[
+                    leg!("sell", "put", b.atm, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put1, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_put1 - b.atm).abs() > 0.001 {
-            add("Risk Reversal (Bullish)", &[
-                leg!("buy", "call", b.otm_call1, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-            ]);
-            add("Risk Reversal (Bearish)", &[
-                leg!("buy", "put", b.otm_put1, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-            ]);
+            add(
+                "Risk Reversal (Bullish)",
+                &[
+                    leg!("buy", "call", b.otm_call1, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                ],
+            );
+            add(
+                "Risk Reversal (Bearish)",
+                &[
+                    leg!("buy", "put", b.otm_put1, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.itm_call1 - b.atm).abs() > 0.001 {
-            add("Long Guts", &[
-                leg!("buy", "call", b.itm_call1, expiry, 1.0),
-                leg!("buy", "put", b.itm_put1, expiry, 1.0),
-            ]);
+            add(
+                "Long Guts",
+                &[
+                    leg!("buy", "call", b.itm_call1, expiry, 1.0),
+                    leg!("buy", "put", b.itm_put1, expiry, 1.0),
+                ],
+            );
         }
     }
 
     if max_legs >= 3 {
         if (b.otm_call1 - b.atm).abs() > 0.001 {
-            add("Ratio Call Spread", &[
-                leg!("buy", "call", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 2.0),
-            ]);
+            add(
+                "Ratio Call Spread",
+                &[
+                    leg!("buy", "call", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 2.0),
+                ],
+            );
         }
 
         if (b.otm_put1 - b.atm).abs() > 0.001 {
-            add("Ratio Put Spread", &[
-                leg!("buy", "put", b.atm, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 2.0),
-            ]);
+            add(
+                "Ratio Put Spread",
+                &[
+                    leg!("buy", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 2.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_call2 - b.otm_call1).abs() > 0.001 {
-            add("Call Butterfly", &[
-                leg!("buy", "call", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 2.0),
-                leg!("buy", "call", b.otm_call2, expiry, 1.0),
-            ]);
+            add(
+                "Call Butterfly",
+                &[
+                    leg!("buy", "call", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 2.0),
+                    leg!("buy", "call", b.otm_call2, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_put1 - b.atm).abs() > 0.001 && (b.otm_put2 - b.otm_put1).abs() > 0.001 {
-            add("Put Butterfly", &[
-                leg!("buy", "put", b.atm, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 2.0),
-                leg!("buy", "put", b.otm_put2, expiry, 1.0),
-            ]);
+            add(
+                "Put Butterfly",
+                &[
+                    leg!("buy", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 2.0),
+                    leg!("buy", "put", b.otm_put2, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_call2 - b.otm_call1).abs() > 0.001 {
-            add("Jade Lizard", &[
-                leg!("sell", "put", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-                leg!("buy", "call", b.otm_call2, expiry, 1.0),
-            ]);
+            add(
+                "Jade Lizard",
+                &[
+                    leg!("sell", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                    leg!("buy", "call", b.otm_call2, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.itm_call1 - b.atm).abs() > 0.001 && (b.otm_call1 - b.atm).abs() > 0.001 {
-            add("Call Ladder", &[
-                leg!("buy", "call", b.itm_call1, expiry, 1.0),
-                leg!("sell", "call", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-            ]);
+            add(
+                "Call Ladder",
+                &[
+                    leg!("buy", "call", b.itm_call1, expiry, 1.0),
+                    leg!("sell", "call", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.itm_put1 - b.atm).abs() > 0.001 && (b.otm_put1 - b.atm).abs() > 0.001 {
-            add("Put Ladder", &[
-                leg!("buy", "put", b.itm_put1, expiry, 1.0),
-                leg!("sell", "put", b.atm, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-            ]);
+            add(
+                "Put Ladder",
+                &[
+                    leg!("buy", "put", b.itm_put1, expiry, 1.0),
+                    leg!("sell", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_call2 - b.otm_call1).abs() > 0.001 {
-            add("Call Backspread", &[
-                leg!("sell", "call", b.atm, expiry, 1.0),
-                leg!("buy", "call", b.otm_call1, expiry, 2.0),
-            ]);
+            add(
+                "Call Backspread",
+                &[
+                    leg!("sell", "call", b.atm, expiry, 1.0),
+                    leg!("buy", "call", b.otm_call1, expiry, 2.0),
+                ],
+            );
         }
 
         if (b.otm_put1 - b.atm).abs() > 0.001 && (b.otm_put2 - b.otm_put1).abs() > 0.001 {
-            add("Put Backspread", &[
-                leg!("sell", "put", b.atm, expiry, 1.0),
-                leg!("buy", "put", b.otm_put1, expiry, 2.0),
-            ]);
+            add(
+                "Put Backspread",
+                &[
+                    leg!("sell", "put", b.atm, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put1, expiry, 2.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_call2 - b.otm_call1).abs() > 0.001 {
-            add("Short Call Butterfly", &[
-                leg!("sell", "call", b.atm, expiry, 1.0),
-                leg!("buy", "call", b.otm_call1, expiry, 2.0),
-                leg!("sell", "call", b.otm_call2, expiry, 1.0),
-            ]);
+            add(
+                "Short Call Butterfly",
+                &[
+                    leg!("sell", "call", b.atm, expiry, 1.0),
+                    leg!("buy", "call", b.otm_call1, expiry, 2.0),
+                    leg!("sell", "call", b.otm_call2, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_put1 - b.atm).abs() > 0.001 && (b.otm_put2 - b.otm_put1).abs() > 0.001 {
-            add("Short Put Butterfly", &[
-                leg!("sell", "put", b.atm, expiry, 1.0),
-                leg!("buy", "put", b.otm_put1, expiry, 2.0),
-                leg!("sell", "put", b.otm_put2, expiry, 1.0),
-            ]);
+            add(
+                "Short Put Butterfly",
+                &[
+                    leg!("sell", "put", b.atm, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put1, expiry, 2.0),
+                    leg!("sell", "put", b.otm_put2, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001
             && (b.otm_call2 - b.otm_call1).abs() > 0.001
             && (b.otm_put1 - b.atm).abs() > 0.001
         {
-            add("Seagull (Bullish)", &[
-                leg!("buy", "call", b.atm, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-            ]);
-            add("Seagull (Bearish)", &[
-                leg!("buy", "put", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-            ]);
+            add(
+                "Seagull (Bullish)",
+                &[
+                    leg!("buy", "call", b.atm, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                ],
+            );
+            add(
+                "Seagull (Bearish)",
+                &[
+                    leg!("buy", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                ],
+            );
         }
     }
 
@@ -767,38 +839,50 @@ fn enum_single_expiry(
             && (b.otm_call2 - b.otm_call1).abs() > 0.001
             && (b.otm_put2 - b.otm_put1).abs() > 0.001
         {
-            add("Iron Condor", &[
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-                leg!("buy", "call", b.otm_call2, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-                leg!("buy", "put", b.otm_put2, expiry, 1.0),
-            ]);
+            add(
+                "Iron Condor",
+                &[
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                    leg!("buy", "call", b.otm_call2, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put2, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_call3 - b.otm_call1).abs() > 0.001 {
-            add("Broken Wing Butterfly (Call)", &[
-                leg!("buy", "call", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 2.0),
-                leg!("buy", "call", b.otm_call3, expiry, 1.0),
-            ]);
+            add(
+                "Broken Wing Butterfly (Call)",
+                &[
+                    leg!("buy", "call", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 2.0),
+                    leg!("buy", "call", b.otm_call3, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call2 - b.atm).abs() > 0.001 && (b.otm_put2 - b.atm).abs() > 0.001 {
-            add("Iron Butterfly", &[
-                leg!("buy", "call", b.otm_call2, expiry, 1.0),
-                leg!("sell", "call", b.atm, expiry, 1.0),
-                leg!("sell", "put", b.atm, expiry, 1.0),
-                leg!("buy", "put", b.otm_put2, expiry, 1.0),
-            ]);
+            add(
+                "Iron Butterfly",
+                &[
+                    leg!("buy", "call", b.otm_call2, expiry, 1.0),
+                    leg!("sell", "call", b.atm, expiry, 1.0),
+                    leg!("sell", "put", b.atm, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put2, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001 && (b.otm_put1 - b.atm).abs() > 0.001 {
-            add("Reverse Iron Butterfly", &[
-                leg!("buy", "call", b.atm, expiry, 1.0),
-                leg!("buy", "put", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-            ]);
+            add(
+                "Reverse Iron Butterfly",
+                &[
+                    leg!("buy", "call", b.atm, expiry, 1.0),
+                    leg!("buy", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                ],
+            );
         }
 
         if (b.otm_call1 - b.atm).abs() > 0.001
@@ -806,29 +890,38 @@ fn enum_single_expiry(
             && (b.otm_call2 - b.otm_call1).abs() > 0.001
             && (b.otm_put2 - b.otm_put1).abs() > 0.001
         {
-            add("Reverse Iron Condor", &[
-                leg!("buy", "call", b.otm_call1, expiry, 1.0),
-                leg!("sell", "call", b.otm_call2, expiry, 1.0),
-                leg!("buy", "put", b.otm_put1, expiry, 1.0),
-                leg!("sell", "put", b.otm_put2, expiry, 1.0),
-            ]);
+            add(
+                "Reverse Iron Condor",
+                &[
+                    leg!("buy", "call", b.otm_call1, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call2, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put1, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put2, expiry, 1.0),
+                ],
+            );
         }
     }
 
     if max_legs >= 5 {
         if (b.otm_call3 - b.otm_call2).abs() > 0.001 {
-            add("Call Condor", &[
-                leg!("buy", "call", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 1.0),
-                leg!("sell", "call", b.otm_call2, expiry, 1.0),
-                leg!("buy", "call", b.otm_call3, expiry, 1.0),
-            ]);
-            add("Put Condor", &[
-                leg!("buy", "put", b.atm, expiry, 1.0),
-                leg!("sell", "put", b.otm_put1, expiry, 1.0),
-                leg!("sell", "put", b.otm_put2, expiry, 1.0),
-                leg!("buy", "put", b.otm_put3, expiry, 1.0),
-            ]);
+            add(
+                "Call Condor",
+                &[
+                    leg!("buy", "call", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call2, expiry, 1.0),
+                    leg!("buy", "call", b.otm_call3, expiry, 1.0),
+                ],
+            );
+            add(
+                "Put Condor",
+                &[
+                    leg!("buy", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 1.0),
+                    leg!("sell", "put", b.otm_put2, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put3, expiry, 1.0),
+                ],
+            );
         }
     }
 
@@ -838,14 +931,17 @@ fn enum_single_expiry(
             && (b.otm_call2 - b.otm_call1).abs() > 0.001
             && (b.otm_put2 - b.otm_put1).abs() > 0.001
         {
-            add("Double Ratio Spread", &[
-                leg!("buy", "call", b.atm, expiry, 1.0),
-                leg!("buy", "put", b.atm, expiry, 1.0),
-                leg!("sell", "call", b.otm_call1, expiry, 2.0),
-                leg!("sell", "put", b.otm_put1, expiry, 2.0),
-                leg!("buy", "call", b.otm_call2, expiry, 1.0),
-                leg!("buy", "put", b.otm_put2, expiry, 1.0),
-            ]);
+            add(
+                "Double Ratio Spread",
+                &[
+                    leg!("buy", "call", b.atm, expiry, 1.0),
+                    leg!("buy", "put", b.atm, expiry, 1.0),
+                    leg!("sell", "call", b.otm_call1, expiry, 2.0),
+                    leg!("sell", "put", b.otm_put1, expiry, 2.0),
+                    leg!("buy", "call", b.otm_call2, expiry, 1.0),
+                    leg!("buy", "put", b.otm_put2, expiry, 1.0),
+                ],
+            );
         }
     }
 
@@ -887,12 +983,10 @@ fn enum_calendars(
                 None => continue,
             };
 
-            let chains: HashMap<String, &Value> = [
-                (near_exp.clone(), near_chain),
-                (far_exp.clone(), far_chain),
-            ]
-            .into_iter()
-            .collect();
+            let chains: HashMap<String, &Value> =
+                [(near_exp.clone(), near_chain), (far_exp.clone(), far_chain)]
+                    .into_iter()
+                    .collect();
 
             let mut add = |name: &str, specs: &[LegSpec]| {
                 if let Some(c) = build_candidate(name, specs, &chains, spot_price, exchanges) {
@@ -900,37 +994,52 @@ fn enum_calendars(
                 }
             };
 
-            add("Call Calendar", &[
-                leg!("sell", "call", b_near.atm, near_exp, 1.0),
-                leg!("buy", "call", b_far.atm, far_exp, 1.0),
-            ]);
+            add(
+                "Call Calendar",
+                &[
+                    leg!("sell", "call", b_near.atm, near_exp, 1.0),
+                    leg!("buy", "call", b_far.atm, far_exp, 1.0),
+                ],
+            );
 
-            add("Put Calendar", &[
-                leg!("sell", "put", b_near.atm, near_exp, 1.0),
-                leg!("buy", "put", b_far.atm, far_exp, 1.0),
-            ]);
+            add(
+                "Put Calendar",
+                &[
+                    leg!("sell", "put", b_near.atm, near_exp, 1.0),
+                    leg!("buy", "put", b_far.atm, far_exp, 1.0),
+                ],
+            );
 
             if (b_near.otm_call1 - b_near.atm).abs() > 0.001 {
-                add("Call Diagonal", &[
-                    leg!("sell", "call", b_near.otm_call1, near_exp, 1.0),
-                    leg!("buy", "call", b_far.atm, far_exp, 1.0),
-                ]);
+                add(
+                    "Call Diagonal",
+                    &[
+                        leg!("sell", "call", b_near.otm_call1, near_exp, 1.0),
+                        leg!("buy", "call", b_far.atm, far_exp, 1.0),
+                    ],
+                );
             }
 
             if (b_near.otm_put1 - b_near.atm).abs() > 0.001 {
-                add("Put Diagonal", &[
-                    leg!("sell", "put", b_near.otm_put1, near_exp, 1.0),
-                    leg!("buy", "put", b_far.atm, far_exp, 1.0),
-                ]);
+                add(
+                    "Put Diagonal",
+                    &[
+                        leg!("sell", "put", b_near.otm_put1, near_exp, 1.0),
+                        leg!("buy", "put", b_far.atm, far_exp, 1.0),
+                    ],
+                );
             }
 
             if max_legs >= 4 {
-                add("Double Calendar", &[
-                    leg!("sell", "call", b_near.atm, near_exp, 1.0),
-                    leg!("buy", "call", b_far.atm, far_exp, 1.0),
-                    leg!("sell", "put", b_near.atm, near_exp, 1.0),
-                    leg!("buy", "put", b_far.atm, far_exp, 1.0),
-                ]);
+                add(
+                    "Double Calendar",
+                    &[
+                        leg!("sell", "call", b_near.atm, near_exp, 1.0),
+                        leg!("buy", "call", b_far.atm, far_exp, 1.0),
+                        leg!("sell", "put", b_near.atm, near_exp, 1.0),
+                        leg!("buy", "put", b_far.atm, far_exp, 1.0),
+                    ],
+                );
             }
         }
     }
@@ -945,13 +1054,8 @@ fn add_delta_hedge(candidate: &mut Candidate, spot_price: f64, futures: &[Value]
     }
 
     let perp = futures.iter().find(|f| {
-        f.get("isPerp")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false)
-            && f.get("markPrice")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0)
-                > 0.0
+        f.get("isPerp").and_then(|v| v.as_bool()).unwrap_or(false)
+            && f.get("markPrice").and_then(|v| v.as_f64()).unwrap_or(0.0) > 0.0
     });
 
     let perp = match perp {
@@ -1031,11 +1135,7 @@ pub fn run_optimizer(
     let chain_by_expiry: HashMap<String, Value> = options_data
         .get("data")
         .and_then(|d| d.as_object())
-        .map(|obj| {
-            obj.iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
-        })
+        .map(|obj| obj.iter().map(|(k, v)| (k.clone(), v.clone())).collect())
         .unwrap_or_default();
 
     let mut candidates: Vec<Candidate> = Vec::new();
@@ -1047,15 +1147,22 @@ pub fn run_optimizer(
         };
         let calls = chain.get("calls").and_then(|v| v.as_array());
         let puts = chain.get("puts").and_then(|v| v.as_array());
-        if calls.map(|a| a.is_empty()).unwrap_or(true)
-            || puts.map(|a| a.is_empty()).unwrap_or(true)
+        if calls.map(|a| a.is_empty()).unwrap_or(true) || puts.map(|a| a.is_empty()).unwrap_or(true)
         {
             continue;
         }
-        candidates.extend(enum_single_expiry(expiry, chain, spot_price, max_legs, exchanges));
+        candidates.extend(enum_single_expiry(
+            expiry, chain, spot_price, max_legs, exchanges,
+        ));
     }
 
-    candidates.extend(enum_calendars(&expirations, &chain_by_expiry, spot_price, max_legs, exchanges));
+    candidates.extend(enum_calendars(
+        &expirations,
+        &chain_by_expiry,
+        spot_price,
+        max_legs,
+        exchanges,
+    ));
 
     let delta_target = targets
         .get("delta")
@@ -1086,10 +1193,7 @@ pub fn run_optimizer(
         .filter(|(_, score, _)| *score > 0.0)
         .collect();
 
-    scored.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     // Deduplicate
     let mut seen: HashSet<String> = HashSet::new();
@@ -1158,10 +1262,7 @@ pub fn run_optimizer(
         .collect();
 
     let mut result_items: Vec<(Candidate, f64, String)> = [top10, bonus_multi].concat();
-    result_items.sort_by(|a, b| {
-        b.1.partial_cmp(&a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    result_items.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
     result_items
         .into_iter()
@@ -1191,14 +1292,8 @@ pub async fn handler(
     Json(body): Json<Value>,
 ) -> impl IntoResponse {
     let targets = body.get("targets").cloned().unwrap_or(json!({}));
-    let max_cost = body
-        .get("maxCost")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
-    let max_legs = body
-        .get("maxLegs")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(4) as usize;
+    let max_cost = body.get("maxCost").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let max_legs = body.get("maxLegs").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
     let target_expiry = body
         .get("targetExpiry")
         .and_then(|v| v.as_str())
@@ -1215,10 +1310,7 @@ pub async fn handler(
         .unwrap_or_else(|| vec!["bybit".into(), "okx".into(), "deribit".into()]);
 
     let options_data = body.get("optionsData").cloned().unwrap_or(json!({}));
-    let spot_price = body
-        .get("spot")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
+    let spot_price = body.get("spot").and_then(|v| v.as_f64()).unwrap_or(0.0);
     let futures_raw: Vec<Value> = body
         .get("futures")
         .and_then(|v| v.as_array())

@@ -4,5 +4,6 @@ export function apiPath(path) {
 }
 
 export function ssePath(path) {
-  return apiPath(path)
+  const base = process.env.NEXT_PUBLIC_SSE_BASE_URL || ''
+  return `${base}${apiPath(path)}`
 }

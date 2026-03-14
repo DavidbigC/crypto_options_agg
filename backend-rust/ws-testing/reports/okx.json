@@ -1,0 +1,51 @@
+{
+  "exchange": "okx",
+  "sample_seconds": 45,
+  "markets": [
+    {
+      "market": "BTC-USD",
+      "rest": {
+        "reference": "rest",
+        "reference_contracts": 798,
+        "ws_contracts": 0,
+        "matched_contracts": 0,
+        "differing_contracts": 0,
+        "missing_from_ws": 798,
+        "missing_from_reference": 0
+      },
+      "rust": {
+        "reference": "rust",
+        "reference_contracts": 764,
+        "ws_contracts": 0,
+        "matched_contracts": 0,
+        "differing_contracts": 0,
+        "missing_from_ws": 764,
+        "missing_from_reference": 0
+      },
+      "verdict": "viable_with_caveats"
+    },
+    {
+      "market": "ETH-USD",
+      "rest": {
+        "reference": "rest",
+        "reference_contracts": 740,
+        "ws_contracts": 0,
+        "matched_contracts": 0,
+        "differing_contracts": 0,
+        "missing_from_ws": 740,
+        "missing_from_reference": 0
+      },
+      "rust": {
+        "reference": "rust",
+        "reference_contracts": 704,
+        "ws_contracts": 0,
+        "matched_contracts": 0,
+        "differing_contracts": 0,
+        "missing_from_ws": 704,
+        "missing_from_reference": 0
+      },
+      "verdict": "viable_with_caveats"
+    }
+  ],
+  "verdict": "viable_with_caveats"
+}

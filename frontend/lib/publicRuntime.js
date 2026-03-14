@@ -28,7 +28,6 @@ export function getHeaderLinks(env = process.env) {
   return [
     { href: '/analysis', label: 'Analysis' },
     { href: '/polysis', label: 'Polysis' },
-    ...(runtime.optimizerEnabled ? [{ href: '/optimizer', label: 'Optimizer' }] : []),
     { href: '/builder', label: 'Strategy Builder' },
     ...(runtime.portfolioEnabled ? [{ href: '/portfolio', label: 'Portfolio' }] : []),
   ]

@@ -5,7 +5,8 @@ App-first workspace for watching crypto options markets, comparing exchange quot
 The public repo is centered on the web app:
 
 - `frontend/`: Next.js interface for chains, scanners, optimizer, builder, portfolio, and analysis views
-- `backend/`: Express API and market-data services for Bybit, OKX, Deribit, and Derive
+- `backend-rust/`: active Rust API and market-data services
+- `archive/backend-node/`: archived Node/Express backend source, kept for reference only
 - `docs/`: design notes and implementation plans
 
 Legacy research material and local-only experiments are intentionally left out of the GitHub-facing scope.
@@ -29,11 +30,13 @@ Hosted public mode intentionally disables sensitive pages and APIs:
 
 ```text
 .
-├── backend/             # Express API, exchange adapters, analytics, tests
+├── archive/
+│   └── backend-node/    # Archived Node/Express backend source only
+├── backend-rust/        # Active Rust backend
 ├── docs/                # Plans and reference docs
 ├── frontend/            # Next.js app router UI
-├── ecosystem.config.js  # Optional PM2 config
-├── start.sh             # Starts backend and frontend together
+├── ecosystem.config.js  # Optional PM2 config for frontend + Rust backend
+├── start.sh             # Starts Rust backend and frontend together
 └── README.md
 ```
 
@@ -41,6 +44,7 @@ Hosted public mode intentionally disables sensitive pages and APIs:
 
 - Node.js 18+
 - npm
+- Rust toolchain with Cargo
 
 ## Modes
 
@@ -59,34 +63,32 @@ Install and run both services with:
 
 That script:
 
-- installs backend dependencies if missing
 - installs frontend dependencies if missing
-- seeds `backend/.env` from `backend/.env.example` if needed
-- starts the backend on `http://localhost:3500`
+- starts the Rust backend on `http://localhost:3501`
 - starts the frontend on `http://localhost:3000`
 
 `start.sh` is for local/private use only. It is not the production startup path.
 
+`start-rust.sh` remains as a compatibility alias and now delegates to `./start.sh`.
+
 If you prefer to run each service manually:
 
 ```bash
-cd backend
-npm install
-cp .env.example .env
-npm run dev
+cd backend-rust
+APP_MODE=private PORT=3501 cargo run --bin options-backend
 ```
 
 ```bash
 cd frontend
 npm install
-npm run dev
+BACKEND_BASE_URL=http://localhost:3501 NEXT_PUBLIC_SSE_BASE_URL=http://localhost:3501 npm run dev
 ```
 
 ## Environment
 
 ### Local/private mode
 
-The backend reads local `.env` files by default. The checked-in example is enough for local startup; the only required runtime setting in the current codepath is `PORT`, which defaults to `3500`.
+The Rust backend reads local `.env` files by default. It checks `backend-rust/.env`, then the project root `.env`, then the archived Node backend env file as a fallback for reference preservation. The default local port in the startup scripts is `3501`.
 
 If you add private exchange credentials or other local settings, keep them in ignored `.env` files only.
 
@@ -130,15 +132,16 @@ Private-only areas:
 
 This repository is being kept intentionally narrow for publishing:
 
-- core app code lives in `frontend/` and `backend/`
+- core app code lives in `frontend/` and `backend-rust/`
+- archived Node source lives in `archive/backend-node/`
 - planning docs stay under `docs/`
 - generated files, private env files, research folders, and local scratch material are excluded
 
 ## Development notes
 
-- Backend entrypoint: `backend/server.js`
+- Backend entrypoint: `backend-rust/src/main.rs`
 - Frontend entrypoint: `frontend/app/page.tsx`
-- Package manifests live in `backend/package.json` and `frontend/package.json`
+- Package manifests live in `backend-rust/Cargo.toml` and `frontend/package.json`
 - Hosted mode design: `docs/plans/2026-03-12-hosted-public-mode-design.md`
 
 ## Production notes

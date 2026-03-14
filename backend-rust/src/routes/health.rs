@@ -20,21 +20,41 @@ fn unix_to_iso(secs: u64) -> String {
     loop {
         let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
         let days_in_year = if leap { 366 } else { 365 };
-        if remaining < days_in_year { break; }
+        if remaining < days_in_year {
+            break;
+        }
         remaining -= days_in_year;
         year += 1;
     }
     let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
-    let month_days: [u64; 12] = [31, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let month_days: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut month = 1u64;
     for &md in &month_days {
-        if remaining < md { break; }
+        if remaining < md {
+            break;
+        }
         remaining -= md;
         month += 1;
     }
     let day = remaining + 1;
 
-    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z", year, month, day, h, m, s)
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.000Z",
+        year, month, day, h, m, s
+    )
 }
 
 pub async fn handler() -> Json<Value> {

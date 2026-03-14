@@ -23,6 +23,19 @@ export const deribitCache = {
   SOL: { summaries: [], spot: 0 },
 }
 
+async function readDeribitJson(res) {
+  const body = await res.text()
+  if (!body.trim()) {
+    throw new Error('empty response body')
+  }
+
+  try {
+    return JSON.parse(body)
+  } catch (err) {
+    throw new Error(`invalid JSON response: ${err.message}`)
+  }
+}
+
 // ─── Instrument name parser ───────────────────────────────────────────────────
 // Format: BTC-27DEC24-100000-C  or  SOL_USDC-27DEC24-200-C
 const MONTHS = { JAN:1,FEB:2,MAR:3,APR:4,MAY:5,JUN:6,JUL:7,AUG:8,SEP:9,OCT:10,NOV:11,DEC:12 }
@@ -60,13 +73,13 @@ function parseDeribitInstName(name) {
 }
 
 // ─── Polling ──────────────────────────────────────────────────────────────────
-async function pollDeribitSpot(coin) {
+export async function pollDeribitSpot(coin) {
   const config = DERIBIT_COINS[coin]
   if (!config) return
   try {
     const url = `${DERIBIT_BASE}/public/get_index_price?index_name=${config.indexName}`
     const res = await fetch(url, { headers: { 'User-Agent': 'deribit-options-viewer/1.0' } })
-    const json = await res.json()
+    const json = await readDeribitJson(res)
     const price = json.result?.index_price ?? 0
     if (price > 0) deribitCache[coin].spot = price
   } catch (err) {
@@ -81,7 +94,7 @@ export async function pollDeribitOptions(coin) {
   try {
     const url = `${DERIBIT_BASE}/public/get_book_summary_by_currency?currency=${config.currency}&kind=option`
     const res = await fetch(url, { headers: { 'User-Agent': 'deribit-options-viewer/1.0' } })
-    const json = await res.json()
+    const json = await readDeribitJson(res)
 
     if (json.error || !Array.isArray(json.result)) {
       console.error(`Deribit poll error (${coin}):`, json.error?.message ?? 'bad response')

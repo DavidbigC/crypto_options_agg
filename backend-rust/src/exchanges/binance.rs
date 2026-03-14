@@ -105,10 +105,9 @@ async fn handle_message(state: &AppState, msg: &Value) {
                 Some(s) => s.to_string(),
                 None => continue,
             };
-            if let Some(index_price) = item["i"].as_f64() {
-                if index_price > 0.0 {
-                    spot_cache.insert(coin.to_string(), index_price);
-                }
+            let index_price = parse_f64_value(&item["i"]);
+            if index_price > 0.0 {
+                spot_cache.insert(coin.to_string(), index_price);
             }
             coin_cache.insert(symbol, item.clone());
         }
@@ -123,7 +122,44 @@ async fn handle_message(state: &AppState, msg: &Value) {
     if let Some(p) = payload {
         let key = format!("binance:{}", coin);
         crate::sse::broadcast(&state.sse_senders, &key, p.to_string()).await;
+        crate::exchanges::combined::broadcast_update(state, coin).await;
     }
+}
+
+fn parse_f64_value(value: &Value) -> f64 {
+    match value {
+        Value::String(s) => s.parse::<f64>().unwrap_or(0.0),
+        Value::Number(n) => n.as_f64().unwrap_or(0.0),
+        _ => 0.0,
+    }
+}
+
+fn has_contract_signal(
+    bid: f64,
+    ask: f64,
+    bid_size: f64,
+    ask_size: f64,
+    delta: f64,
+    gamma: f64,
+    theta: f64,
+    vega: f64,
+    mark_vol: f64,
+    bid_vol: f64,
+    ask_vol: f64,
+    mark_price: f64,
+) -> bool {
+    bid > 0.0
+        || ask > 0.0
+        || bid_size > 0.0
+        || ask_size > 0.0
+        || delta != 0.0
+        || gamma != 0.0
+        || theta != 0.0
+        || vega != 0.0
+        || mark_vol > 0.0
+        || bid_vol > 0.0
+        || ask_vol > 0.0
+        || mark_price > 0.0
 }
 
 fn parse_symbol(symbol: &str) -> Option<(String, f64, &'static str)> {
@@ -167,25 +203,55 @@ pub fn build_response(
             None => continue,
         };
 
+        let bid = parse_f64_value(&item["bo"]);
+        let ask = parse_f64_value(&item["ao"]);
+        let bid_size = parse_f64_value(&item["bq"]);
+        let ask_size = parse_f64_value(&item["aq"]);
+        let delta = parse_f64_value(&item["d"]);
+        let gamma = parse_f64_value(&item["g"]);
+        let theta = parse_f64_value(&item["t"]);
+        let vega = parse_f64_value(&item["v"]);
+        let implied_volatility = parse_f64_value(&item["vo"]);
+        let bid_vol = parse_f64_value(&item["b"]);
+        let ask_vol = parse_f64_value(&item["a"]);
+        let mark_price = parse_f64_value(&item["mp"]);
+
+        if !has_contract_signal(
+            bid,
+            ask,
+            bid_size,
+            ask_size,
+            delta,
+            gamma,
+            theta,
+            vega,
+            implied_volatility,
+            bid_vol,
+            ask_vol,
+            mark_price,
+        ) {
+            continue;
+        }
+
         let contract = json!({
             "symbol":            symbol,
             "strike":            strike,
             "optionType":        option_type,
-            "bid":               item["bo"].as_f64().unwrap_or(0.0),
-            "ask":               item["ao"].as_f64().unwrap_or(0.0),
+            "bid":               bid,
+            "ask":               ask,
             "last":              0,
             "volume":            0,
-            "bidSize":           item["bq"].as_f64().unwrap_or(0.0),
-            "askSize":           item["aq"].as_f64().unwrap_or(0.0),
-            "delta":             item["d"].as_f64().unwrap_or(0.0),
-            "gamma":             item["g"].as_f64().unwrap_or(0.0),
-            "theta":             item["t"].as_f64().unwrap_or(0.0),
-            "vega":              item["v"].as_f64().unwrap_or(0.0),
-            "impliedVolatility": item["vo"].as_f64().unwrap_or(0.0),
-            "markVol":           item["vo"].as_f64().unwrap_or(0.0),
-            "bidVol":            item["b"].as_f64().unwrap_or(0.0),
-            "askVol":            item["a"].as_f64().unwrap_or(0.0),
-            "markPrice":         item["mp"].as_f64().unwrap_or(0.0),
+            "bidSize":           bid_size,
+            "askSize":           ask_size,
+            "delta":             delta,
+            "gamma":             gamma,
+            "theta":             theta,
+            "vega":              vega,
+            "impliedVolatility": implied_volatility,
+            "markVol":           implied_volatility,
+            "bidVol":            bid_vol,
+            "askVol":            ask_vol,
+            "markPrice":         mark_price,
             "openInterest":      0,
         });
 
@@ -232,4 +298,108 @@ pub fn build_response(
         "expirationCounts": expiration_counts,
         "data": data_obj,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_response, handle_message};
+    use crate::{sse, state::AppState};
+    use serde_json::json;
+    use std::{collections::HashMap, sync::Arc, time::Duration};
+
+    #[tokio::test]
+    async fn binance_updates_refresh_the_combined_btc_stream() {
+        let state = Arc::new(AppState::new());
+        let tx = sse::get_or_create_sender(&state.sse_senders, "combined:BTC").await;
+        let mut rx = tx.subscribe();
+
+        handle_message(
+            &state,
+            &json!({
+                "stream": "btcusdt@optionMarkPrice",
+                "data": [{
+                    "s": "BTC-260320-100000-C",
+                    "i": "100500",
+                    "bo": "12.5",
+                    "ao": "13.0",
+                    "bq": "1",
+                    "aq": "1",
+                    "d": "0.5",
+                    "g": "0.01",
+                    "t": "-5",
+                    "v": "100",
+                    "vo": "0.6",
+                    "b": "0.58",
+                    "a": "0.62",
+                    "mp": "12.7"
+                }]
+            }),
+        )
+        .await;
+
+        let payload = tokio::time::timeout(Duration::from_millis(100), rx.recv())
+            .await
+            .expect("expected combined stream update")
+            .expect("combined stream channel should stay open");
+        let parsed: serde_json::Value =
+            serde_json::from_str(&payload).expect("combined stream payload should be valid json");
+
+        assert_eq!(parsed["spotPrice"], json!(100500.0));
+        assert_eq!(parsed["expirations"], json!(["2026-03-20"]));
+        assert_eq!(
+            parsed["data"]["2026-03-20"]["calls"][0]["strike"],
+            json!(100000.0)
+        );
+        assert_eq!(
+            parsed["data"]["2026-03-20"]["calls"][0]["bestBidEx"],
+            json!("binance")
+        );
+    }
+
+    #[test]
+    fn build_response_parses_string_encoded_binance_fields() {
+        let mut by_coin = HashMap::new();
+        by_coin.insert(
+            "BTC".to_string(),
+            [(
+                "BTC-260314-70000-C".to_string(),
+                json!({
+                    "bo": "12.5",
+                    "ao": "13.5",
+                    "bq": "1.1",
+                    "aq": "2.2",
+                    "d": "0.48",
+                    "g": "0.0003",
+                    "t": "-9.5",
+                    "v": "31.2",
+                    "vo": "0.57",
+                    "b": "0.55",
+                    "a": "0.59",
+                    "mp": "13.0"
+                }),
+            )]
+            .into_iter()
+            .collect(),
+        );
+
+        let mut spot = HashMap::new();
+        spot.insert("BTC".to_string(), 70123.4);
+
+        let response = build_response(&by_coin, &spot, "BTC").expect("binance response");
+        let contract = &response["data"]["2026-03-14"]["calls"][0];
+
+        assert_eq!(response["spotPrice"], json!(70123.4));
+        assert_eq!(contract["bid"], json!(12.5));
+        assert_eq!(contract["ask"], json!(13.5));
+        assert_eq!(contract["bidSize"], json!(1.1));
+        assert_eq!(contract["askSize"], json!(2.2));
+        assert_eq!(contract["delta"], json!(0.48));
+        assert_eq!(contract["gamma"], json!(0.0003));
+        assert_eq!(contract["theta"], json!(-9.5));
+        assert_eq!(contract["vega"], json!(31.2));
+        assert_eq!(contract["markVol"], json!(0.57));
+        assert_eq!(contract["bidVol"], json!(0.55));
+        assert_eq!(contract["askVol"], json!(0.59));
+        assert_eq!(contract["markPrice"], json!(13.0));
+    }
 }

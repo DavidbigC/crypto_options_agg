@@ -1,15 +1,18 @@
+use crate::state::AppState;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::{Json, sse::{Event, Sse}},
+    response::{
+        sse::{Event, Sse},
+        Json,
+    },
 };
 use futures_util::stream::Stream;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{sync::Arc, time::Duration};
-use crate::state::AppState;
 
-const VALID_ASSETS:   &[&str] = &["BTC", "ETH", "SOL"];
+const VALID_ASSETS: &[&str] = &["BTC", "ETH", "SOL"];
 const VALID_HORIZONS: &[&str] = &["daily", "weekly", "monthly", "yearly"];
 
 #[derive(Deserialize, Default)]
@@ -23,17 +26,28 @@ pub async fn analysis(
     Query(q): Query<SpotQuery>,
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, StatusCode> {
-    let asset   = asset.to_uppercase();
+    let asset = asset.to_uppercase();
     let horizon = horizon.to_lowercase();
-    if !VALID_ASSETS.contains(&asset.as_str())     { return Err(StatusCode::BAD_REQUEST); }
-    if !VALID_HORIZONS.contains(&horizon.as_str()) { return Err(StatusCode::BAD_REQUEST); }
+    if !VALID_ASSETS.contains(&asset.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !VALID_HORIZONS.contains(&horizon.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let spot = q.spot_price.unwrap_or(0.0);
     match crate::exchanges::polymarket::get_analysis(
-        &asset, &horizon, spot, &state.http_client,
-        &state.polymarket_prices, &state.polymarket_discovery, &state.polymarket_oi,
-    ).await {
-        Ok(v)  => Ok(Json(v)),
+        &asset,
+        &horizon,
+        spot,
+        &state.http_client,
+        &state.polymarket_prices,
+        &state.polymarket_discovery,
+        &state.polymarket_oi,
+    )
+    .await
+    {
+        Ok(v) => Ok(Json(v)),
         Err(e) => {
             tracing::warn!("Polymarket analysis error: {}", e);
             Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -47,14 +61,22 @@ pub async fn surface(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Value>, StatusCode> {
     let asset = asset.to_uppercase();
-    if !VALID_ASSETS.contains(&asset.as_str()) { return Err(StatusCode::BAD_REQUEST); }
+    if !VALID_ASSETS.contains(&asset.as_str()) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
 
     let spot = q.spot_price.unwrap_or(0.0);
     match crate::exchanges::polymarket::get_surface(
-        &asset, spot, &state.http_client,
-        &state.polymarket_prices, &state.polymarket_discovery, &state.polymarket_oi,
-    ).await {
-        Ok(v)  => Ok(Json(v)),
+        &asset,
+        spot,
+        &state.http_client,
+        &state.polymarket_prices,
+        &state.polymarket_discovery,
+        &state.polymarket_oi,
+    )
+    .await
+    {
+        Ok(v) => Ok(Json(v)),
         Err(e) => {
             tracing::warn!("Polymarket surface error: {}", e);
             Err(StatusCode::SERVICE_UNAVAILABLE)
@@ -75,9 +97,9 @@ pub async fn stream(
     let mut rx = tx.subscribe();
 
     let http_client = state.http_client.clone();
-    let prices      = state.polymarket_prices.clone();
-    let discovery   = state.polymarket_discovery.clone();
-    let oi_cache    = state.polymarket_oi.clone();
+    let prices = state.polymarket_prices.clone();
+    let discovery = state.polymarket_discovery.clone();
+    let oi_cache = state.polymarket_oi.clone();
 
     let stream = async_stream::stream! {
         yield Ok(Event::default().retry(Duration::from_secs(1)));

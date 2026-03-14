@@ -27,18 +27,20 @@ async fn refresh(state: &AppState, client: &reqwest::Client, coin: &str) {
     );
     let mut rows: Vec<serde_json::Value> = Vec::new();
     match bybit_res {
-        Ok(r)  => rows.extend(r),
+        Ok(r) => rows.extend(r),
         Err(e) => tracing::warn!("futures bybit {coin}: {e}"),
     }
     match okx_res {
-        Ok(r)  => rows.extend(r),
+        Ok(r) => rows.extend(r),
         Err(e) => tracing::warn!("futures okx {coin}: {e}"),
     }
     match deribit_res {
-        Ok(r)  => rows.extend(r),
+        Ok(r) => rows.extend(r),
         Err(e) => tracing::warn!("futures deribit {coin}: {e}"),
     }
-    if rows.is_empty() { return; }
+    if rows.is_empty() {
+        return;
+    }
     sort_futures(&mut rows);
     state.futures.write().await.insert(coin.to_string(), rows);
 }
@@ -76,12 +78,22 @@ fn ts_millis_to_date(ts_ms: i64) -> String {
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
-async fn poll_bybit(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+async fn poll_bybit(
+    client: &reqwest::Client,
+    coin: &str,
+) -> anyhow::Result<Vec<serde_json::Value>> {
     let url = format!("https://api.bybit.com/v5/market/tickers?category=inverse&baseCoin={coin}");
-    let json: serde_json::Value = client.get(&url)
+    let json: serde_json::Value = client
+        .get(&url)
         .header("User-Agent", "options-viewer/1.0")
-        .send().await?.json().await?;
-    let list = json["result"]["list"].as_array().cloned().unwrap_or_default();
+        .send()
+        .await?
+        .json()
+        .await?;
+    let list = json["result"]["list"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     let items: Vec<serde_json::Value> = list.iter().map(|t| {
         let delivery = t["deliveryTime"].as_str().unwrap_or("0");
         let is_perp = delivery == "0";
@@ -108,22 +120,35 @@ async fn poll_bybit(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<
 /// OKX: "BTC-USD-260925" → "2026-09-25", "BTC-USD-SWAP" → None
 fn parse_okx_expiry(inst_id: &str) -> Option<String> {
     let last = inst_id.split('-').last()?;
-    if last == "SWAP" || last.len() != 6 { return None; }
+    if last == "SWAP" || last.len() != 6 {
+        return None;
+    }
     Some(format!("20{}-{}-{}", &last[0..2], &last[2..4], &last[4..6]))
 }
 
 async fn poll_okx(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<serde_json::Value>> {
     let family = format!("{coin}-USD");
     let (fut_res, swap_res) = tokio::join!(
-        client.get(format!("https://www.okx.com/api/v5/market/tickers?instType=FUTURES&instFamily={family}"))
-            .header("User-Agent", "options-viewer/1.0").send(),
-        client.get(format!("https://www.okx.com/api/v5/market/tickers?instType=SWAP&instFamily={family}"))
-            .header("User-Agent", "options-viewer/1.0").send(),
+        client
+            .get(format!(
+                "https://www.okx.com/api/v5/market/tickers?instType=FUTURES&instFamily={family}"
+            ))
+            .header("User-Agent", "options-viewer/1.0")
+            .send(),
+        client
+            .get(format!(
+                "https://www.okx.com/api/v5/market/tickers?instType=SWAP&instFamily={family}"
+            ))
+            .header("User-Agent", "options-viewer/1.0")
+            .send(),
     );
-    let fut_json:  serde_json::Value = fut_res?.json().await?;
+    let fut_json: serde_json::Value = fut_res?.json().await?;
     let swap_json: serde_json::Value = swap_res?.json().await?;
     let empty = vec![];
-    let all: Vec<&serde_json::Value> = swap_json["data"].as_array().unwrap_or(&empty).iter()
+    let all: Vec<&serde_json::Value> = swap_json["data"]
+        .as_array()
+        .unwrap_or(&empty)
+        .iter()
         .chain(fut_json["data"].as_array().unwrap_or(&empty).iter())
         .collect();
     let mut items: Vec<serde_json::Value> = Vec::new();
@@ -153,16 +178,30 @@ async fn poll_okx(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<se
 }
 
 const MONTHS: &[(&str, u32)] = &[
-    ("JAN",1),("FEB",2),("MAR",3),("APR",4),("MAY",5),("JUN",6),
-    ("JUL",7),("AUG",8),("SEP",9),("OCT",10),("NOV",11),("DEC",12),
+    ("JAN", 1),
+    ("FEB", 2),
+    ("MAR", 3),
+    ("APR", 4),
+    ("MAY", 5),
+    ("JUN", 6),
+    ("JUL", 7),
+    ("AUG", 8),
+    ("SEP", 9),
+    ("OCT", 10),
+    ("NOV", 11),
+    ("DEC", 12),
 ];
 
 /// Deribit: "BTC-13MAR26" → "2026-03-13", "BTC-PERPETUAL" → None
 fn parse_deribit_expiry(name: &str) -> Option<String> {
-    if name.contains("PERPETUAL") { return None; }
+    if name.contains("PERPETUAL") {
+        return None;
+    }
     let dash = name.find('-')?;
     let date_str = &name[dash + 1..]; // e.g. "13MAR26"
-    if date_str.len() < 7 { return None; }
+    if date_str.len() < 7 {
+        return None;
+    }
     let day: u32 = date_str[..2].parse().ok()?;
     let mon_str = &date_str[2..5];
     let month = MONTHS.iter().find(|(k, _)| *k == mon_str.to_uppercase())?.1;
@@ -170,14 +209,21 @@ fn parse_deribit_expiry(name: &str) -> Option<String> {
     Some(format!("{:04}-{:02}-{:02}", year, month, day))
 }
 
-async fn poll_deribit(client: &reqwest::Client, coin: &str) -> anyhow::Result<Vec<serde_json::Value>> {
+async fn poll_deribit(
+    client: &reqwest::Client,
+    coin: &str,
+) -> anyhow::Result<Vec<serde_json::Value>> {
     let currency = if coin == "SOL" { "SOL_USDC" } else { coin };
     let url = format!(
         "https://www.deribit.com/api/v2/public/get_book_summary_by_currency?currency={currency}&kind=future"
     );
-    let json: serde_json::Value = client.get(&url)
+    let json: serde_json::Value = client
+        .get(&url)
         .header("User-Agent", "options-viewer/1.0")
-        .send().await?.json().await?;
+        .send()
+        .await?
+        .json()
+        .await?;
     let summaries = json["result"].as_array().cloned().unwrap_or_default();
     let mut items: Vec<serde_json::Value> = Vec::new();
     for s in &summaries {

@@ -20,9 +20,18 @@ fn parse_number(v: &Value) -> f64 {
 fn parse_option_date(raw: &str) -> Option<String> {
     let value = raw.to_uppercase();
     let months = [
-        ("JAN", "01"), ("FEB", "02"), ("MAR", "03"), ("APR", "04"),
-        ("MAY", "05"), ("JUN", "06"), ("JUL", "07"), ("AUG", "08"),
-        ("SEP", "09"), ("OCT", "10"), ("NOV", "11"), ("DEC", "12"),
+        ("JAN", "01"),
+        ("FEB", "02"),
+        ("MAR", "03"),
+        ("APR", "04"),
+        ("MAY", "05"),
+        ("JUN", "06"),
+        ("JUL", "07"),
+        ("AUG", "08"),
+        ("SEP", "09"),
+        ("OCT", "10"),
+        ("NOV", "11"),
+        ("DEC", "12"),
     ];
 
     // Match pattern: 1-2 digits, 3 letters, 2 digits
@@ -193,14 +202,9 @@ fn normalize_positions(position_payloads: &[Value]) -> Vec<Value> {
                 raw_size.abs()
             };
             let mark_price = parse_number(position.get("markPrice").unwrap_or(&Value::Null));
-            let position_margin =
-                parse_number(position.get("positionIM").unwrap_or(&Value::Null));
-            let index_price =
-                parse_number(position.get("indexPrice").unwrap_or(&Value::Null));
-            let kind = parsed
-                .get("kind")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let position_margin = parse_number(position.get("positionIM").unwrap_or(&Value::Null));
+            let index_price = parse_number(position.get("indexPrice").unwrap_or(&Value::Null));
+            let kind = parsed.get("kind").and_then(|v| v.as_str()).unwrap_or("");
             let reference_price = if index_price != 0.0 {
                 index_price
             } else if kind == "option" {
@@ -274,8 +278,7 @@ fn aggregate_greeks(positions: &[Value]) -> Value {
     let mut total_gamma = 0.0f64;
     let mut total_theta = 0.0f64;
     let mut total_vega = 0.0f64;
-    let mut by_coin: std::collections::HashMap<String, [f64; 4]> =
-        std::collections::HashMap::new();
+    let mut by_coin: std::collections::HashMap<String, [f64; 4]> = std::collections::HashMap::new();
 
     for pos in positions {
         let delta = pos.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -344,8 +347,8 @@ fn make_iso_timestamp() -> String {
 
 fn build_signature(secret_key: &str, api_key: &str, timestamp: &str, query_string: &str) -> String {
     let message = format!("{}{}{}{}", timestamp, api_key, RECV_WINDOW, query_string);
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret_key.as_bytes())
-        .expect("HMAC accepts any key size");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret_key.as_bytes()).expect("HMAC accepts any key size");
     mac.update(message.as_bytes());
     let result = mac.finalize().into_bytes();
     hex::encode(result)
@@ -399,13 +402,19 @@ async fn bybit_get(
         .await
         .map_err(|e| format!("Bybit JSON parse error: {}", e))?;
 
-    let ret_code = payload.get("retCode").and_then(|v| v.as_i64()).unwrap_or(-1);
+    let ret_code = payload
+        .get("retCode")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
     if ret_code != 0 {
         let msg = payload
             .get("retMsg")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
-        return Err(format!("Bybit request failed with code {}: {}", ret_code, msg));
+        return Err(format!(
+            "Bybit request failed with code {}: {}",
+            ret_code, msg
+        ));
     }
 
     Ok(payload)
@@ -423,11 +432,41 @@ pub async fn handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
 
     let (account_res, balance_res, option_pos_res, linear_usdt_res, linear_usdc_res, inverse_res) = tokio::join!(
         bybit_get(client, "/v5/account/info", &[], &api_key, &secret_key),
-        bybit_get(client, "/v5/account/wallet-balance", &[("accountType", "UNIFIED")], &api_key, &secret_key),
-        bybit_get(client, "/v5/position/list", &[("category", "option")], &api_key, &secret_key),
-        bybit_get(client, "/v5/position/list", &[("category", "linear"), ("settleCoin", "USDT")], &api_key, &secret_key),
-        bybit_get(client, "/v5/position/list", &[("category", "linear"), ("settleCoin", "USDC")], &api_key, &secret_key),
-        bybit_get(client, "/v5/position/list", &[("category", "inverse")], &api_key, &secret_key),
+        bybit_get(
+            client,
+            "/v5/account/wallet-balance",
+            &[("accountType", "UNIFIED")],
+            &api_key,
+            &secret_key
+        ),
+        bybit_get(
+            client,
+            "/v5/position/list",
+            &[("category", "option")],
+            &api_key,
+            &secret_key
+        ),
+        bybit_get(
+            client,
+            "/v5/position/list",
+            &[("category", "linear"), ("settleCoin", "USDT")],
+            &api_key,
+            &secret_key
+        ),
+        bybit_get(
+            client,
+            "/v5/position/list",
+            &[("category", "linear"), ("settleCoin", "USDC")],
+            &api_key,
+            &secret_key
+        ),
+        bybit_get(
+            client,
+            "/v5/position/list",
+            &[("category", "inverse")],
+            &api_key,
+            &secret_key
+        ),
     );
 
     let account_payload = match account_res {
@@ -479,7 +518,11 @@ pub async fn handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
         .unwrap_or("");
 
     let avail_bal_raw = parse_number(wallet.get("totalAvailableBalance").unwrap_or(&Value::Null));
-    let available_equity_usd: Value = if avail_bal_raw == 0.0 { Value::Null } else { json!(avail_bal_raw) };
+    let available_equity_usd: Value = if avail_bal_raw == 0.0 {
+        Value::Null
+    } else {
+        json!(avail_bal_raw)
+    };
 
     let result = json!({
         "exchange": "bybit",

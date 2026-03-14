@@ -9,6 +9,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 const WS_URL: &str = "wss://www.deribit.com/ws/api/v2";
 const DERIBIT_BASE: &str = "https://www.deribit.com/api/v2";
+const REST_POLL_INTERVAL_SECS: u64 = 2;
 
 // (coin, currency, index_name, instrument_prefix)
 const COINS: &[(&str, &str, &str, Option<&str>)] = &[
@@ -55,7 +56,7 @@ async fn poll_coin(
                 tracing::error!("Deribit poll error ({}): {}", coin, e);
             }
         }
-        sleep(Duration::from_secs(5)).await;
+        sleep(Duration::from_secs(REST_POLL_INTERVAL_SECS)).await;
     }
 }
 
@@ -440,4 +441,18 @@ pub fn build_response(
         "expirationCounts": expiration_counts,
         "data": data_obj,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn deribit_rest_poll_interval_is_two_seconds() {
+        const SOURCE: &str = include_str!("deribit.rs");
+        let production_source = SOURCE.split("#[cfg(test)]").next().unwrap_or(SOURCE);
+
+        assert!(
+            production_source.contains("const REST_POLL_INTERVAL_SECS: u64 = 2;"),
+            "expected Deribit REST polling interval constant to be set to 2 seconds"
+        );
+    }
 }

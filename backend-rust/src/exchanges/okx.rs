@@ -171,6 +171,9 @@ async fn poll_tickers(state: Arc<AppState>, client: reqwest::Client, family: Str
                     if !payload.is_null() {
                         let key = format!("okx:{}", family);
                         crate::sse::broadcast(&state.sse_senders, &key, payload.to_string()).await;
+                        if let Some(coin) = family.split('-').next() {
+                            crate::exchanges::combined::broadcast_update(&state, coin).await;
+                        }
                     }
                 }
             }
@@ -193,10 +196,7 @@ async fn fetch_tickers(client: &reqwest::Client, family: &str) -> Result<Vec<Val
         .send()
         .await?;
     let body: Value = resp.json().await?;
-    let list = body["data"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let list = body["data"].as_array().cloned().unwrap_or_default();
     Ok(list)
 }
 
@@ -337,7 +337,11 @@ pub fn build_response(
         let oi = parse_f64_value(&item["oi"]);
         let fwd_px = parse_f64_value(&item["fwdPx"]);
 
-        let gamma = if spot_price > 0.0 { gamma_raw / spot_price } else { 0.0 };
+        let gamma = if spot_price > 0.0 {
+            gamma_raw / spot_price
+        } else {
+            0.0
+        };
         let theta = theta_raw * spot_price;
         let vega = vega_raw * spot_price;
 

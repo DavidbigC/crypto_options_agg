@@ -11,7 +11,7 @@ use axum::response::{IntoResponse, Response};
 #[derive(Clone)]
 pub struct RateLimiter {
     buckets: Arc<Mutex<HashMap<String, (u32, Instant)>>>,
-    limit:       u32,
+    limit: u32,
     window_secs: u64,
 }
 
@@ -25,7 +25,8 @@ impl RateLimiter {
     }
 
     pub async fn layer(self, req: Request<Body>, next: Next) -> Response {
-        let ip = req.headers()
+        let ip = req
+            .headers()
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.split(',').next())
@@ -33,14 +34,14 @@ impl RateLimiter {
             .unwrap_or_else(|| "unknown".to_string());
 
         let path = req.uri().path().to_string();
-        let key  = format!("{}:{}", ip, path);
+        let key = format!("{}:{}", ip, path);
 
-        let now    = Instant::now();
+        let now = Instant::now();
         let window = std::time::Duration::from_secs(self.window_secs);
 
         let allowed = {
             let mut map = self.buckets.lock().unwrap();
-            let entry   = map.entry(key).or_insert((0, now));
+            let entry = map.entry(key).or_insert((0, now));
             if now.duration_since(entry.1) >= window {
                 *entry = (1, now);
                 true

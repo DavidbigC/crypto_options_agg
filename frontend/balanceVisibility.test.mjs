@@ -17,3 +17,7 @@ test('filterVisibleBalances keeps only BTC ETH USDT balances with at least one d
     { currency: 'USDT', usdValue: 12.5 },
   ])
 })
+
+test('filterVisibleBalances returns an empty list for missing balances', () => {
+  assert.deepEqual(filterVisibleBalances(undefined), [])
+})

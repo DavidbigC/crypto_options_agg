@@ -13,7 +13,9 @@ import SellScanner from '@/components/scanners/SellScanner'
 import classNames from 'classnames'
 import { OptionsData, Exchange } from '@/types/options'
 import { apiPath, ssePath } from '@/lib/apiBase.js'
+import { SCANNER_META, SCANNER_ORDER } from '@/lib/scannerMetadata.mjs'
 type ExchangeKey = 'bybit' | 'okx' | 'deribit' | 'derive' | 'binance'
+type ScannerKey = 'gamma' | 'vega' | 'sell'
 const ALL_EXCHANGES: ExchangeKey[] = ['bybit', 'okx', 'deribit', 'derive', 'binance']
 import type { BoxSpread, ArbOpportunity } from '@/lib/strategies'
 import { filterExpirations } from '@/lib/filterExpirations'
@@ -22,6 +24,20 @@ const OKX_FAMILY_MAP: Record<string, string> = {
   BTC: 'BTC-USD',
   ETH: 'ETH-USD',
   SOL: 'SOL-USD',
+}
+
+function buildOptionsUrl(exchange: Exchange, coin: 'BTC' | 'ETH' | 'SOL') {
+  return exchange === 'okx'
+    ? apiPath(`okx/options/${OKX_FAMILY_MAP[coin]}`)
+    : exchange === 'combined'
+      ? apiPath(`combined/options/${coin}`)
+      : exchange === 'deribit'
+        ? apiPath(`deribit/options/${coin}`)
+        : exchange === 'derive'
+          ? apiPath(`derive/options/${coin}`)
+          : exchange === 'binance'
+            ? apiPath(`binance/options/${coin}`)
+            : apiPath(`bybit/snapshot/${coin}`)
 }
 
 export default function HomePage() {
@@ -35,7 +51,7 @@ export default function HomePage() {
   const [activeExchanges, setActiveExchanges] = useState<Set<ExchangeKey>>(new Set(ALL_EXCHANGES))
   const [boxSpreads, setBoxSpreads] = useState<BoxSpread[]>([])
   const [allArbs, setAllArbs] = useState<ArbOpportunity[]>([])
-  const [activeScanner, setActiveScanner] = useState<'gamma' | 'vega' | 'sell' | null>(null)
+  const [activeScanner, setActiveScanner] = useState<ScannerKey | null>(null)
   const fetchVersion = useRef(0)
   const selectedExpirationRef = useRef('')
 
@@ -51,6 +67,32 @@ export default function HomePage() {
     const coin = (ex: Exchange) => ex === 'okx' ? OKX_FAMILY_MAP[selectedCrypto] : selectedCrypto
     const expiryParam = selectedExpiration ? `?expiry=${selectedExpiration}` : ''
     const evtSource = new EventSource(ssePath(`stream/${exchange}/${coin(exchange)}${expiryParam}`))
+    const loadingTimeout = !isExpiryChange
+      ? setTimeout(() => {
+          if (version === fetchVersion.current) setLoading(false)
+        }, 4000)
+      : null
+
+    if (!isExpiryChange) {
+      fetch(buildOptionsUrl(exchange, selectedCrypto))
+        .then(r => r.json())
+        .then(data => {
+          if (version !== fetchVersion.current) return
+          if (!data || data.error || !data.data) return
+          setOptionsData(data)
+          setSpotPrice(data.spotPrice ?? 0)
+          setLastUpdated(new Date())
+          setLoading(false)
+          if (data.expirations?.length > 0 && !selectedExpirationRef.current) {
+            const first = filterExpirations(data.expirations)[0] ?? data.expirations[0]
+            setSelectedExpiration(first)
+            selectedExpirationRef.current = first
+          }
+        })
+        .catch(() => {
+          if (version === fetchVersion.current) setLoading(false)
+        })
+    }
 
     evtSource.onmessage = (e) => {
       if (version !== fetchVersion.current) { evtSource.close(); return }
@@ -69,6 +111,7 @@ export default function HomePage() {
         setSpotPrice(data.spotPrice ?? 0)
         setLastUpdated(new Date())
         setLoading(false)
+        if (loadingTimeout) clearTimeout(loadingTimeout)
         if (data.expirations?.length > 0 && !selectedExpirationRef.current) {
           const first = filterExpirations(data.expirations)[0] ?? data.expirations[0]
           setSelectedExpiration(first)
@@ -78,10 +121,15 @@ export default function HomePage() {
     }
 
     evtSource.onerror = () => {
+      if (version === fetchVersion.current) setLoading(false)
+      if (loadingTimeout) clearTimeout(loadingTimeout)
       if (version !== fetchVersion.current) evtSource.close()
     }
 
-    return () => evtSource.close()
+    return () => {
+      if (loadingTimeout) clearTimeout(loadingTimeout)
+      evtSource.close()
+    }
   }, [selectedCrypto, exchange, selectedExpiration])
 
   useEffect(() => {
@@ -201,39 +249,20 @@ export default function HomePage() {
             </div>
           )}
           <div className="flex-shrink-0 self-start flex gap-1">
-            <button
-              onClick={() => setActiveScanner(v => v === 'gamma' ? null : 'gamma')}
-              className={classNames(
-                'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
-                activeScanner === 'gamma'
-                  ? 'bg-violet-600 text-white border-violet-600'
-                  : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
-              )}
-            >
-              Γ Scanner
-            </button>
-            <button
-              onClick={() => setActiveScanner(v => v === 'vega' ? null : 'vega')}
-              className={classNames(
-                'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
-                activeScanner === 'vega'
-                  ? 'bg-emerald-600 text-white border-emerald-600'
-                  : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
-              )}
-            >
-              V Scanner
-            </button>
-            <button
-              onClick={() => setActiveScanner(v => v === 'sell' ? null : 'sell')}
-              className={classNames(
-                'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
-                activeScanner === 'sell'
-                  ? 'bg-sky-600 text-white border-sky-600'
-                  : 'text-ink-2 border-rim hover:border-ink-3 hover:text-ink'
-              )}
-            >
-              Sell
-            </button>
+            {(SCANNER_ORDER as ScannerKey[]).map((scannerKey) => (
+              <button
+                key={scannerKey}
+                onClick={() => setActiveScanner(v => v === scannerKey ? null : scannerKey)}
+                className={classNames(
+                  'px-2.5 py-1 rounded border text-[11px] font-medium transition-colors',
+                  activeScanner === scannerKey
+                    ? SCANNER_META[scannerKey].activeClass
+                    : SCANNER_META[scannerKey].idleClass
+                )}
+              >
+                {SCANNER_META[scannerKey].buttonLabel}
+              </button>
+            ))}
           </div>
         </div>
 

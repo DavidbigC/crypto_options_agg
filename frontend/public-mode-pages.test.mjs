@@ -37,3 +37,9 @@ test('public runtime honors explicit client-side feature overrides', () => {
   assert.equal(isPortfolioEnabled(env), true)
   assert.equal(isOptimizerEnabled(env), false)
 })
+
+test('header links do not expose optimizer navigation even in private mode', () => {
+  const links = getHeaderLinks({ NEXT_PUBLIC_APP_MODE: 'private' })
+
+  assert.equal(links.some((link) => link.href === '/optimizer'), false)
+})

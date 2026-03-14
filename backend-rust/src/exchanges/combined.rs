@@ -1,7 +1,6 @@
 use crate::state::AppState;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 struct MergedContract {
     strike: f64,
@@ -48,12 +47,7 @@ impl MergedContract {
         let prices_obj: serde_json::Map<String, Value> = self
             .prices
             .iter()
-            .map(|(ex, (bid, ask))| {
-                (
-                    ex.clone(),
-                    json!({ "bid": bid, "ask": ask }),
-                )
-            })
+            .map(|(ex, (bid, ask))| (ex.clone(), json!({ "bid": bid, "ask": ask })))
             .collect();
 
         json!({
@@ -88,7 +82,7 @@ fn merge_exchange_data(
     forward_prices: &mut HashMap<String, f64>,
     exchange_name: &str,
     response: &Value,
-    bid_multiplier: f64,  // for OKX: spot_price; for others: 1.0
+    bid_multiplier: f64, // for OKX: spot_price; for others: 1.0
 ) {
     let data = match response["data"].as_object() {
         Some(d) => d,
@@ -146,19 +140,33 @@ fn merge_exchange_data(
                 let bid_vol = parse_f64(&contract["bidVol"]);
                 let ask_vol = parse_f64(&contract["askVol"]);
 
-                if delta != 0.0 { entry.delta = delta; }
-                if gamma != 0.0 { entry.gamma = gamma; }
-                if theta != 0.0 { entry.theta = theta; }
-                if vega != 0.0 { entry.vega = vega; }
-                if mark_vol != 0.0 { entry.mark_vol = mark_vol; }
-                if bid_vol != 0.0 { entry.bid_vol = bid_vol; }
-                if ask_vol != 0.0 { entry.ask_vol = ask_vol; }
+                if delta != 0.0 {
+                    entry.delta = delta;
+                }
+                if gamma != 0.0 {
+                    entry.gamma = gamma;
+                }
+                if theta != 0.0 {
+                    entry.theta = theta;
+                }
+                if vega != 0.0 {
+                    entry.vega = vega;
+                }
+                if mark_vol != 0.0 {
+                    entry.mark_vol = mark_vol;
+                }
+                if bid_vol != 0.0 {
+                    entry.bid_vol = bid_vol;
+                }
+                if ask_vol != 0.0 {
+                    entry.ask_vol = ask_vol;
+                }
             }
         }
     }
 }
 
-pub async fn build_combined_response(state: &Arc<AppState>, coin: &str) -> Option<Value> {
+pub async fn build_combined_response(state: &AppState, coin: &str) -> Option<Value> {
     let coin_upper = coin.to_uppercase();
 
     // Acquire all read locks and call each exchange's build_response
@@ -210,7 +218,13 @@ pub async fn build_combined_response(state: &Arc<AppState>, coin: &str) -> Optio
 
     // Determine best spot price (max non-zero across exchanges)
     let mut best_spot = 0.0f64;
-    for resp in &[&bybit_response, &okx_response.0, &deribit_response, &derive_response, &binance_response] {
+    for resp in &[
+        &bybit_response,
+        &okx_response.0,
+        &deribit_response,
+        &derive_response,
+        &binance_response,
+    ] {
         let s = resp["spotPrice"].as_f64().unwrap_or(0.0);
         if s > best_spot {
             best_spot = s;
@@ -223,29 +237,59 @@ pub async fn build_combined_response(state: &Arc<AppState>, coin: &str) -> Optio
 
     // Bybit (bid/ask already in USD)
     if !bybit_response.is_null() {
-        merge_exchange_data(&mut merged, &mut forward_prices, "bybit", &bybit_response, 1.0);
+        merge_exchange_data(
+            &mut merged,
+            &mut forward_prices,
+            "bybit",
+            &bybit_response,
+            1.0,
+        );
     }
 
     // OKX: bid/ask in BTC units, multiply by spot
     let (okx_resp, okx_spot) = okx_response;
     if !okx_resp.is_null() {
         let multiplier = if okx_spot > 0.0 { okx_spot } else { best_spot };
-        merge_exchange_data(&mut merged, &mut forward_prices, "okx", &okx_resp, multiplier);
+        merge_exchange_data(
+            &mut merged,
+            &mut forward_prices,
+            "okx",
+            &okx_resp,
+            multiplier,
+        );
     }
 
     // Deribit (bid/ask already in USD)
     if !deribit_response.is_null() {
-        merge_exchange_data(&mut merged, &mut forward_prices, "deribit", &deribit_response, 1.0);
+        merge_exchange_data(
+            &mut merged,
+            &mut forward_prices,
+            "deribit",
+            &deribit_response,
+            1.0,
+        );
     }
 
     // Derive (bid/ask already in USD)
     if !derive_response.is_null() {
-        merge_exchange_data(&mut merged, &mut forward_prices, "derive", &derive_response, 1.0);
+        merge_exchange_data(
+            &mut merged,
+            &mut forward_prices,
+            "derive",
+            &derive_response,
+            1.0,
+        );
     }
 
     // Binance (bid/ask already in USD)
     if !binance_response.is_null() {
-        merge_exchange_data(&mut merged, &mut forward_prices, "binance", &binance_response, 1.0);
+        merge_exchange_data(
+            &mut merged,
+            &mut forward_prices,
+            "binance",
+            &binance_response,
+            1.0,
+        );
     }
 
     if merged.is_empty() {
@@ -309,4 +353,12 @@ pub async fn build_combined_response(state: &Arc<AppState>, coin: &str) -> Optio
         "expirationCounts": expiration_counts,
         "data":             data_obj,
     }))
+}
+
+pub async fn broadcast_update(state: &AppState, coin: &str) {
+    let coin = coin.to_uppercase();
+    if let Some(payload) = build_combined_response(state, &coin).await {
+        let key = format!("combined:{}", coin);
+        crate::sse::broadcast(&state.sse_senders, &key, payload.to_string()).await;
+    }
 }

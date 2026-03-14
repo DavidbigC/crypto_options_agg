@@ -1,8 +1,8 @@
 # Dependencies
 node_modules/
-backend/node_modules/
+archive/backend-node/node_modules/
 frontend/node_modules/
-backend/venv/
+archive/backend-node/venv/
 
 # Build output
 frontend/.next/
@@ -17,7 +17,7 @@ __pycache__/
 .env
 .env.local
 .env.*.local
-backend/.env
+archive/backend-node/.env
 frontend/.env.local
 
 # Logs

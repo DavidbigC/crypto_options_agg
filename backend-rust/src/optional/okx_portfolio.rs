@@ -9,6 +9,16 @@ use crate::state::AppState;
 
 const OKX_BASE_URL: &str = "https://www.okx.com";
 
+fn env_first(keys: &[&str]) -> String {
+    for key in keys {
+        let value = std::env::var(key).unwrap_or_default();
+        if !value.is_empty() {
+            return value;
+        }
+    }
+    String::new()
+}
+
 fn parse_number(v: &Value) -> f64 {
     match v {
         Value::Number(n) => n.as_f64().unwrap_or(0.0),
@@ -95,8 +105,8 @@ fn parse_instrument(inst_id: &str, inst_type: &str) -> Value {
 
 fn sign_request(secret_key: &str, timestamp: &str, method: &str, path: &str, body: &str) -> String {
     let message = format!("{}{}{}{}", timestamp, method, path, body);
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret_key.as_bytes())
-        .expect("HMAC accepts any key size");
+    let mut mac =
+        Hmac::<Sha256>::new_from_slice(secret_key.as_bytes()).expect("HMAC accepts any key size");
     mac.update(message.as_bytes());
     let result = mac.finalize().into_bytes();
     base64::engine::general_purpose::STANDARD.encode(result)
@@ -229,14 +239,8 @@ fn normalize_positions(positions_payload: &Value) -> Vec<Value> {
             parse_number(p) != 0.0
         })
         .map(|pos| {
-            let inst_id = pos
-                .get("instId")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let inst_type = pos
-                .get("instType")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let inst_id = pos.get("instId").and_then(|v| v.as_str()).unwrap_or("");
+            let inst_type = pos.get("instType").and_then(|v| v.as_str()).unwrap_or("");
             let parsed = parse_instrument(inst_id, inst_type);
 
             json!({
@@ -284,8 +288,7 @@ fn aggregate_greeks(positions: &[Value]) -> Value {
     let mut total_gamma = 0.0f64;
     let mut total_theta = 0.0f64;
     let mut total_vega = 0.0f64;
-    let mut by_coin: std::collections::HashMap<String, [f64; 4]> =
-        std::collections::HashMap::new();
+    let mut by_coin: std::collections::HashMap<String, [f64; 4]> = std::collections::HashMap::new();
 
     for pos in positions {
         let delta = pos.get("delta").and_then(|v| v.as_f64()).unwrap_or(0.0);
@@ -390,9 +393,9 @@ async fn okx_get(
 }
 
 pub async fn handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let api_key = std::env::var("OKX_API_KEY").unwrap_or_default();
-    let secret_key = std::env::var("OKX_API_SECRET").unwrap_or_default();
-    let passphrase = std::env::var("OKX_PASSPHRASE").unwrap_or_default();
+    let api_key = env_first(&["OKX_API_KEY", "apikey"]);
+    let secret_key = env_first(&["OKX_API_SECRET", "OKX_SECRET_KEY", "secretkey"]);
+    let passphrase = env_first(&["OKX_PASSPHRASE", "passphrase"]);
     let demo_trading = std::env::var("OKX_DEMO_TRADING")
         .map(|v| v.to_lowercase() == "true")
         .unwrap_or(false);
@@ -404,9 +407,30 @@ pub async fn handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let client = &state.http_client;
 
     let (config_res, balance_res, positions_res) = tokio::join!(
-        okx_get(client, "/api/v5/account/config", &api_key, &secret_key, &passphrase, demo_trading),
-        okx_get(client, "/api/v5/account/balance", &api_key, &secret_key, &passphrase, demo_trading),
-        okx_get(client, "/api/v5/account/positions", &api_key, &secret_key, &passphrase, demo_trading),
+        okx_get(
+            client,
+            "/api/v5/account/config",
+            &api_key,
+            &secret_key,
+            &passphrase,
+            demo_trading
+        ),
+        okx_get(
+            client,
+            "/api/v5/account/balance",
+            &api_key,
+            &secret_key,
+            &passphrase,
+            demo_trading
+        ),
+        okx_get(
+            client,
+            "/api/v5/account/positions",
+            &api_key,
+            &secret_key,
+            &passphrase,
+            demo_trading
+        ),
     );
 
     let config_payload = match config_res {
@@ -430,7 +454,11 @@ pub async fn handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let now = make_timestamp();
 
     let avail_eq_raw = parse_number(balance.get("availEq").unwrap_or(&Value::Null));
-    let available_equity_usd: Value = if avail_eq_raw == 0.0 { Value::Null } else { json!(avail_eq_raw) };
+    let available_equity_usd: Value = if avail_eq_raw == 0.0 {
+        Value::Null
+    } else {
+        json!(avail_eq_raw)
+    };
 
     let result = json!({
         "exchange": "okx",
@@ -455,4 +483,19 @@ pub async fn handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     });
 
     Json(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::env_first;
+
+    #[test]
+    fn env_first_reads_legacy_okx_aliases() {
+        std::env::remove_var("OKX_API_KEY");
+        std::env::set_var("apikey", "legacy-key");
+
+        assert_eq!(env_first(&["OKX_API_KEY", "apikey"]), "legacy-key");
+
+        std::env::remove_var("apikey");
+    }
 }

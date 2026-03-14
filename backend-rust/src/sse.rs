@@ -10,10 +10,7 @@ pub type SseSenders = Arc<RwLock<HashMap<String, broadcast::Sender<String>>>>;
 
 /// Get or create the broadcast channel for a given "exchange:coin" key.
 /// Returns a clone of the sender (cheap — just increments a ref count).
-pub async fn get_or_create_sender(
-    senders: &SseSenders,
-    key: &str,
-) -> broadcast::Sender<String> {
+pub async fn get_or_create_sender(senders: &SseSenders, key: &str) -> broadcast::Sender<String> {
     {
         let read = senders.read().await;
         if let Some(tx) = read.get(key) {

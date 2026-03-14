@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import classNames from 'classnames'
 import { OptionsData, Exchange } from '@/types/options'
+import { SCANNER_META } from '@/lib/scannerMetadata.mjs'
 
 interface SellScannerProps {
   optionsData: OptionsData | null
@@ -39,6 +40,7 @@ function getBestBid(contract: any, activeExchanges?: Set<string>): number {
 }
 
 export default function SellScanner({ optionsData, spotPrice, coin, exchange, activeExchanges }: SellScannerProps) {
+  const scannerMeta = SCANNER_META.sell
   const [optionType, setOptionType] = useState<'calls' | 'puts' | 'both'>('both')
   const [strikeInput, setStrikeInput] = useState('')
   const [sortCol, setSortCol] = useState<SortCol | null>(null)
@@ -183,9 +185,9 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
     <div className="card">
       <div className="flex items-center justify-between mb-3">
         <div>
-          <h2 className="text-sm font-semibold text-ink">Sell Scanner</h2>
+          <h2 className="text-sm font-semibold text-ink">{scannerMeta.panelTitle}</h2>
           <p className="text-xs text-ink-3 mt-0.5">
-            OTM options ranked by APR · click to load into builder
+            {scannerMeta.panelSubtitle}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -255,7 +257,7 @@ export default function SellScanner({ optionsData, spotPrice, coin, exchange, ac
                       'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300':    isCall,
                       'bg-rose-100 dark:bg-rose-900/40 text-rose-700 dark:text-rose-300': !isCall,
                     })}>
-                      {isCall ? 'Call' : 'Put'}
+                      {isCall ? scannerMeta.typeLabels.call : scannerMeta.typeLabels.put}
                     </span>
                   </td>
                   <td className="py-1.5 font-mono text-ink">{fmtExpiry(row.expiry)}</td>

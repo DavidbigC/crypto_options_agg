@@ -80,9 +80,9 @@ async fn poll_once(state: &AppState, client: &reqwest::Client, coin: &str) -> Re
     };
     let data = build_response(&ticker_snap, &spot_snap, coin);
     if !data.is_null() {
-        let payload = json!({ "tickers": data["data"], "spotPrice": data["spotPrice"] });
         let key = format!("bybit:{}", coin);
-        crate::sse::broadcast(&state.sse_senders, &key, payload.to_string()).await;
+        crate::sse::broadcast(&state.sse_senders, &key, data.to_string()).await;
+        crate::exchanges::combined::broadcast_update(state, coin).await;
     }
 
     Ok(())
@@ -128,18 +128,10 @@ pub fn parse_symbol(symbol: &str) -> Option<ParsedSymbol> {
 
     let (day, month_str, year_str) = if date_str.len() == 6 {
         // DMMMYY
-        (
-            &date_str[..1],
-            &date_str[1..4],
-            &date_str[4..6],
-        )
+        (&date_str[..1], &date_str[1..4], &date_str[4..6])
     } else if date_str.len() == 7 {
         // DDMMMYY
-        (
-            &date_str[..2],
-            &date_str[2..5],
-            &date_str[5..7],
-        )
+        (&date_str[..2], &date_str[2..5], &date_str[5..7])
     } else {
         return None;
     };
@@ -147,9 +139,18 @@ pub fn parse_symbol(symbol: &str) -> Option<ParsedSymbol> {
     let day: u32 = day.parse().ok()?;
     let year: u32 = format!("20{}", year_str).parse().ok()?;
     let month: u32 = match month_str {
-        "JAN" => 1, "FEB" => 2, "MAR" => 3, "APR" => 4,
-        "MAY" => 5, "JUN" => 6, "JUL" => 7, "AUG" => 8,
-        "SEP" => 9, "OCT" => 10, "NOV" => 11, "DEC" => 12,
+        "JAN" => 1,
+        "FEB" => 2,
+        "MAR" => 3,
+        "APR" => 4,
+        "MAY" => 5,
+        "JUN" => 6,
+        "JUL" => 7,
+        "AUG" => 8,
+        "SEP" => 9,
+        "OCT" => 10,
+        "NOV" => 11,
+        "DEC" => 12,
         _ => return None,
     };
 

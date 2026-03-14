@@ -1,16 +1,20 @@
-mod config;
-mod cache;
-mod state;
-mod routes;
-mod exchanges;
 mod analysis;
-mod sse;
+mod cache;
+mod config;
+mod exchanges;
 mod optional;
 mod rate_limit;
+mod routes;
+mod sse;
+mod state;
 
-use axum::{Router, middleware, routing::{get, post}};
+use axum::{
+    middleware,
+    routing::{get, post},
+    Router,
+};
 use std::sync::Arc;
-use tower_http::cors::{CorsLayer, Any};
+use tower_http::cors::{Any, CorsLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -47,49 +51,91 @@ async fn main() {
         state.polymarket_oi.clone(),
     );
 
-    let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
 
     // SSE routes (separate so they get a lower rate limit in public mode)
     let sse_routes = Router::new()
-        .route("/api/stream/polymarket/:asset", get(routes::polymarket::stream))
+        .route(
+            "/api/stream/polymarket/:asset",
+            get(routes::polymarket::stream),
+        )
         .route("/api/stream/:exchange/:coin", get(routes::stream::handler));
 
     // REST routes
     let mut rest_routes = Router::new()
         .route("/api/health", get(routes::health::handler))
         .route("/api/options/:base_coin", get(routes::bybit::options_chain))
-        .route("/api/options/:base_coin/:expiration", get(routes::bybit::options_chain_expiry))
+        .route(
+            "/api/options/:base_coin/:expiration",
+            get(routes::bybit::options_chain_expiry),
+        )
+        .route(
+            "/api/bybit/snapshot/:base_coin",
+            get(routes::bybit::snapshot),
+        )
         .route("/api/spots", get(routes::bybit::spots))
         .route("/api/spot/:symbol", get(routes::bybit::spot_single))
-        .route("/api/okx/options/:inst_family", get(routes::okx::options_chain))
+        .route(
+            "/api/okx/options/:inst_family",
+            get(routes::okx::options_chain),
+        )
         .route("/api/okx/spots", get(routes::okx::spots))
         .route("/api/okx/debug/:inst_family", get(routes::okx::debug))
-        .route("/api/deribit/options/:coin", get(routes::deribit::options_chain))
-        .route("/api/binance/options/:coin", get(routes::binance::options_chain))
-        .route("/api/derive/options/:coin", get(routes::derive::options_chain))
+        .route(
+            "/api/deribit/options/:coin",
+            get(routes::deribit::options_chain),
+        )
+        .route(
+            "/api/binance/options/:coin",
+            get(routes::binance::options_chain),
+        )
+        .route(
+            "/api/derive/options/:coin",
+            get(routes::derive::options_chain),
+        )
         .route("/api/derive/debug/:coin", get(routes::derive::debug))
-        .route("/api/combined/options/:base_coin", get(routes::combined::options_chain))
+        .route(
+            "/api/combined/options/:base_coin",
+            get(routes::combined::options_chain),
+        )
         .route("/api/futures/:coin", get(routes::futures::futures_chain))
-        .route("/api/analysis/:exchange/:coin", get(routes::analysis::handler))
+        .route(
+            "/api/analysis/:exchange/:coin",
+            get(routes::analysis::handler),
+        )
         .route("/api/arbs/:coin", get(routes::arbs::handler))
-        .route("/api/scanners/:exchange/:coin", get(routes::scanners::handler))
-        .route("/api/polymarket/surface/:asset", get(routes::polymarket::surface))
-        .route("/api/polymarket/:asset/:horizon", get(routes::polymarket::analysis))
+        .route(
+            "/api/scanners/:exchange/:coin",
+            get(routes::scanners::handler),
+        )
+        .route(
+            "/api/polymarket/surface/:asset",
+            get(routes::polymarket::surface),
+        )
+        .route(
+            "/api/polymarket/:asset/:horizon",
+            get(routes::polymarket::analysis),
+        )
         .route("/api/debug/bybit", get(routes::bybit::debug_bybit));
 
     if cfg.enable_portfolio {
         rest_routes = rest_routes
-            .route("/api/portfolio/okx",  get(optional::okx_portfolio::handler))
-            .route("/api/portfolio/bybit", get(optional::bybit_portfolio::handler));
+            .route("/api/portfolio/okx", get(optional::okx_portfolio::handler))
+            .route(
+                "/api/portfolio/bybit",
+                get(optional::bybit_portfolio::handler),
+            );
     }
     if cfg.enable_optimizer {
-        rest_routes = rest_routes
-            .route("/api/optimizer/:coin", post(optional::optimizer::handler));
+        rest_routes = rest_routes.route("/api/optimizer/:coin", post(optional::optimizer::handler));
     }
 
     // Apply rate limiting in public mode
     let (rest_routes, sse_routes) = if cfg.app_mode == config::AppMode::Public {
-        let api_limiter    = rate_limit::RateLimiter::new(120, 60);
+        let api_limiter = rate_limit::RateLimiter::new(120, 60);
         let stream_limiter = rate_limit::RateLimiter::new(20, 60);
         (
             rest_routes.layer(middleware::from_fn(move |req, next| {

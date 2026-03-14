@@ -1,32 +1,18 @@
 services:
-  # Rust backend (dev/parallel — port 3501)
-  # When parity is verified, replace `backend` service context with ./backend-rust
-  # and remove this service.
-  backend-rust:
+  backend:
     build:
       context: ./backend-rust
     restart: unless-stopped
     ports:
-      - "3501:3500"
-    environment:
-      - APP_MODE=private
-
-  backend:
-    build:
-      context: ./backend
-    restart: unless-stopped
-    ports:
       - "3500:3500"
     environment:
-      - NODE_ENV=production
-      # Add any backend env vars here, e.g.:
-      # SOME_API_KEY: ${SOME_API_KEY}
+      - APP_MODE=private
+      - PORT=3500
 
   frontend:
     build:
       context: ./frontend
       args:
-        # Must match the service name above so Next.js rewrites reach the backend
         BACKEND_BASE_URL: http://backend:3500
     restart: unless-stopped
     ports:

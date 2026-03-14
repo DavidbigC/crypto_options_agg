@@ -1,0 +1,349 @@
+{
+  "exchange": "deribit",
+  "sample_seconds": 30,
+  "markets": [
+    {
+      "market": "BTC",
+      "rest": {
+        "reference": "rest",
+        "reference_contracts": 966,
+        "ws_contracts": 966,
+        "matched_contracts": 0,
+        "differing_contracts": 966,
+        "missing_from_ws": 0,
+        "missing_from_reference": 0,
+        "field_coverage": [
+          {
+            "field_name": "bid",
+            "reference_present": 901,
+            "ws_present": 901,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask",
+            "reference_present": 966,
+            "ws_present": 966,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "last",
+            "reference_present": 846,
+            "ws_present": 846,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "volume",
+            "reference_present": 966,
+            "ws_present": 966,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "bid_size",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask_size",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "delta",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "gamma",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "theta",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "vega",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "implied_volatility",
+            "reference_present": 966,
+            "ws_present": 966,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "mark_vol",
+            "reference_present": 966,
+            "ws_present": 966,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "bid_vol",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask_vol",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "mark_price",
+            "reference_present": 966,
+            "ws_present": 966,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "open_interest",
+            "reference_present": 966,
+            "ws_present": 966,
+            "missing_in_ws": 0
+          }
+        ],
+        "spot_present_in_reference": true,
+        "spot_present_in_ws": true
+      },
+      "rust": null,
+      "verdict": "viable_with_caveats"
+    },
+    {
+      "market": "ETH",
+      "rest": {
+        "reference": "rest",
+        "reference_contracts": 822,
+        "ws_contracts": 822,
+        "matched_contracts": 0,
+        "differing_contracts": 822,
+        "missing_from_ws": 0,
+        "missing_from_reference": 0,
+        "field_coverage": [
+          {
+            "field_name": "bid",
+            "reference_present": 766,
+            "ws_present": 766,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask",
+            "reference_present": 822,
+            "ws_present": 822,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "last",
+            "reference_present": 696,
+            "ws_present": 696,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "volume",
+            "reference_present": 822,
+            "ws_present": 822,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "bid_size",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask_size",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "delta",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "gamma",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "theta",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "vega",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "implied_volatility",
+            "reference_present": 822,
+            "ws_present": 822,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "mark_vol",
+            "reference_present": 822,
+            "ws_present": 822,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "bid_vol",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask_vol",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "mark_price",
+            "reference_present": 822,
+            "ws_present": 822,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "open_interest",
+            "reference_present": 822,
+            "ws_present": 822,
+            "missing_in_ws": 0
+          }
+        ],
+        "spot_present_in_reference": true,
+        "spot_present_in_ws": true
+      },
+      "rust": null,
+      "verdict": "viable_with_caveats"
+    },
+    {
+      "market": "SOL",
+      "rest": {
+        "reference": "rest",
+        "reference_contracts": 264,
+        "ws_contracts": 264,
+        "matched_contracts": 0,
+        "differing_contracts": 264,
+        "missing_from_ws": 0,
+        "missing_from_reference": 0,
+        "field_coverage": [
+          {
+            "field_name": "bid",
+            "reference_present": 138,
+            "ws_present": 138,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask",
+            "reference_present": 150,
+            "ws_present": 150,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "last",
+            "reference_present": 192,
+            "ws_present": 192,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "volume",
+            "reference_present": 264,
+            "ws_present": 264,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "bid_size",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask_size",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "delta",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "gamma",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "theta",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "vega",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "implied_volatility",
+            "reference_present": 264,
+            "ws_present": 264,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "mark_vol",
+            "reference_present": 264,
+            "ws_present": 264,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "bid_vol",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "ask_vol",
+            "reference_present": 0,
+            "ws_present": 0,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "mark_price",
+            "reference_present": 264,
+            "ws_present": 264,
+            "missing_in_ws": 0
+          },
+          {
+            "field_name": "open_interest",
+            "reference_present": 264,
+            "ws_present": 264,
+            "missing_in_ws": 0
+          }
+        ],
+        "spot_present_in_reference": true,
+        "spot_present_in_ws": true
+      },
+      "rust": null,
+      "verdict": "viable_with_caveats"
+    }
+  ],
+  "verdict": "viable_with_caveats"
+}

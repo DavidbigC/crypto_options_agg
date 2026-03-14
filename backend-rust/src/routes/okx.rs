@@ -47,9 +47,7 @@ pub async fn options_chain(
     Ok(Json(data))
 }
 
-pub async fn spots(
-    State(state): State<Arc<AppState>>,
-) -> Json<Value> {
+pub async fn spots(State(state): State<Arc<AppState>>) -> Json<Value> {
     let spot_cache = state.okx_spot.read().await;
     Json(json!({
         "BTC-USDT": spot_cache.get("BTC-USDT").copied().unwrap_or(0.0),
@@ -76,34 +74,56 @@ pub async fn debug(
 
     let mut filtered: Vec<&String> = keys;
     if let Some(ref strike) = query.strike {
-        filtered = filtered.into_iter().filter(|k| k.contains(&format!("-{}-", strike))).collect();
+        filtered = filtered
+            .into_iter()
+            .filter(|k| k.contains(&format!("-{}-", strike)))
+            .collect();
     }
     if let Some(ref expiry) = query.expiry {
-        filtered = filtered.into_iter().filter(|k| k.contains(&format!("-{}-", expiry))).collect();
+        filtered = filtered
+            .into_iter()
+            .filter(|k| k.contains(&format!("-{}-", expiry)))
+            .collect();
     }
     let matched = filtered.len();
 
-    let sample: Vec<Value> = filtered.iter().take(5).map(|inst_id| {
-        let item = &cache[*inst_id];
-        let mark_vol  = item["markVol"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-        let bid_vol   = item["bidVol"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-        let ask_vol   = item["askVol"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-        let delta     = item["delta"].as_str().and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-        json!({
-            "instId": inst_id,
-            "normalized": {
-                "markVol": mark_vol,
-                "bidVol":  bid_vol,
-                "askVol":  ask_vol,
-                "delta":   delta,
-            },
-            "raw": {
-                "markVol": item["markVol"],
-                "bidVol":  item["bidVol"],
-                "askVol":  item["askVol"],
-            },
+    let sample: Vec<Value> = filtered
+        .iter()
+        .take(5)
+        .map(|inst_id| {
+            let item = &cache[*inst_id];
+            let mark_vol = item["markVol"]
+                .as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let bid_vol = item["bidVol"]
+                .as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let ask_vol = item["askVol"]
+                .as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            let delta = item["delta"]
+                .as_str()
+                .and_then(|s| s.parse::<f64>().ok())
+                .unwrap_or(0.0);
+            json!({
+                "instId": inst_id,
+                "normalized": {
+                    "markVol": mark_vol,
+                    "bidVol":  bid_vol,
+                    "askVol":  ask_vol,
+                    "delta":   delta,
+                },
+                "raw": {
+                    "markVol": item["markVol"],
+                    "bidVol":  item["bidVol"],
+                    "askVol":  item["askVol"],
+                },
+            })
         })
-    }).collect();
+        .collect();
 
     Json(json!({
         "totalCached": total_cached,

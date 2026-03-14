@@ -2,17 +2,18 @@ module.exports = {
   apps: [
     {
       name: 'options-backend',
-      cwd: './backend',
-      script: 'server.js',
-      node_args: '--experimental-vm-modules',
+      cwd: './backend-rust',
+      script: `${process.env.HOME}/.cargo/bin/cargo`,
+      args: 'run --release --bin options-backend',
+      interpreter: 'none',
       env: {
-        NODE_ENV: 'production',
         PORT: 3500,
         APP_MODE: 'public',
         LOAD_DOTENV: 'false',
         ENABLE_PORTFOLIO: 'false',
         ENABLE_OPTIMIZER: 'false',
         CORS_ORIGINS: 'https://your-domain.example',
+        CARGO_INCREMENTAL: '0',
       },
       restart_delay: 3000,
     },
