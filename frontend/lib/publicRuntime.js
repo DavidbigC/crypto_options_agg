@@ -3,10 +3,10 @@ function parseBooleanFlag(value, fallback) {
   return String(value).toLowerCase() === 'true'
 }
 
-export function getPublicRuntime(env = process.env) {
-  const appMode = env.NEXT_PUBLIC_APP_MODE === 'public' ? 'public' : 'private'
-  const portfolioEnabled = parseBooleanFlag(env.NEXT_PUBLIC_ENABLE_PORTFOLIO, appMode !== 'public')
-  const optimizerEnabled = parseBooleanFlag(env.NEXT_PUBLIC_ENABLE_OPTIMIZER, appMode !== 'public')
+export function getPublicRuntime() {
+  const appMode = process.env.NEXT_PUBLIC_APP_MODE === 'public' ? 'public' : 'private'
+  const portfolioEnabled = parseBooleanFlag(process.env.NEXT_PUBLIC_ENABLE_PORTFOLIO, appMode !== 'public')
+  const optimizerEnabled = parseBooleanFlag(process.env.NEXT_PUBLIC_ENABLE_OPTIMIZER, appMode !== 'public')
 
   return {
     appMode,
@@ -15,16 +15,16 @@ export function getPublicRuntime(env = process.env) {
   }
 }
 
-export function isPortfolioEnabled(env = process.env) {
-  return getPublicRuntime(env).portfolioEnabled
+export function isPortfolioEnabled() {
+  return getPublicRuntime().portfolioEnabled
 }
 
-export function isOptimizerEnabled(env = process.env) {
-  return getPublicRuntime(env).optimizerEnabled
+export function isOptimizerEnabled() {
+  return getPublicRuntime().optimizerEnabled
 }
 
-export function getHeaderLinks(env = process.env) {
-  const runtime = getPublicRuntime(env)
+export function getHeaderLinks() {
+  const runtime = getPublicRuntime()
   return [
     { href: '/', label: 'Desk' },
     { href: '/analysis', label: 'Analysis' },

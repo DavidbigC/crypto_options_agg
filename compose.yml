@@ -14,6 +14,7 @@ services:
       context: ./frontend
       args:
         BACKEND_BASE_URL: http://host.containers.internal:3500
+        NEXT_PUBLIC_APP_MODE: public
     restart: unless-stopped
     ports:
       - "3000:3000"
