@@ -54,6 +54,7 @@ pub async fn spots(
     Json(json!({
         "BTC-USDT": spot_cache.get("BTC-USDT").copied().unwrap_or(0.0),
         "ETH-USDT": spot_cache.get("ETH-USDT").copied().unwrap_or(0.0),
+        "SOL-USDT": spot_cache.get("SOL-USDT").copied().unwrap_or(0.0),
     }))
 }
 

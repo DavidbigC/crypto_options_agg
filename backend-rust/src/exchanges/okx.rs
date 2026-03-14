@@ -201,7 +201,7 @@ async fn fetch_tickers(client: &reqwest::Client, family: &str) -> Result<Vec<Val
 }
 
 async fn poll_spots(state: Arc<AppState>, client: reqwest::Client) {
-    let spot_ids = ["BTC-USDT", "ETH-USDT"];
+    let spot_ids = ["BTC-USDT", "ETH-USDT", "SOL-USDT"];
     loop {
         for inst_id in &spot_ids {
             match fetch_spot(&client, inst_id).await {
