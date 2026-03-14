@@ -3,5 +3,7 @@
 
 dcoption.xyz {
     encode zstd gzip
+
+    reverse_proxy /api/* crypto_options_agg_backend_1:3500
     reverse_proxy crypto_options_agg_frontend_1:3000
 }
